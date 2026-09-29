@@ -21,6 +21,7 @@ examples/v1-personal-opencode/
 │   ├── opencode.jsonc          # V1 OpenCode + personal provider
 │   └── omo.jsonc               # oh-my-openagent 설정
 └── docs/
+    ├── omo-config-guide.md               # omo.jsonc와 provider/model key 작성법
     └── wrapper-environment-variables.md  # wrapper 환경 변수 설명
 ```
 
