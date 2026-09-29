@@ -1,0 +1,64 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // OpenCode V1 설정 파일입니다. V2의 "plugins"/"providers" plural 키를 사용하지 않습니다.
+  "model": "personal/coder",
+  "small_model": "personal/coder",
+
+  // 회사가 관리하는 공용 release이므로 사용자 자동 업데이트를 막습니다.
+  "autoupdate": false,
+  "share": "disabled",
+
+  // 홈 디스크가 작은 계정에서는 snapshot 데이터가 커질 수 있습니다.
+  "snapshot": false,
+
+  // 개인 provider만 로드합니다. 다른 provider/model과 인증 화면이 뜨지 않습니다.
+  "enabled_providers": ["personal"],
+
+  "provider": {
+    "personal": {
+      // 가정: 개인 LLM이 OpenAI-compatible API를 제공합니다.
+      // 다른 protocol이면 아래 npm과 options를 provider 서버에 맞게 바꾸세요.
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Personal LLM",
+
+      "options": {
+        "baseURL": "http://REPLACE_WITH_PERSONAL_LLM_BASE_URL/v1",
+        "apiKey": "REPLACE_WITH_PERSONAL_API_KEY"
+      },
+
+      "models": {
+        "coder": {
+          "name": "Personal Coder",
+          "limit": {
+            "context": 128000,
+            "output": 32768
+          }
+        }
+      }
+    }
+  },
+
+  // 공용 read-only release에 설치된 OMO를 직접 로드합니다.
+  // npm 이름("oh-my-openagent")으로 쓰면 사용자 cache에 다시 설치될 수 있습니다.
+  "plugin": [
+    "/opt/company-opencode/current/runtime/node_modules/oh-my-openagent"
+  ],
+
+  "permission": {
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "bash": {
+      "*": "ask",
+      "git status *": "allow",
+      "git diff *": "allow",
+      "git push *": "deny",
+      "sudo *": "deny",
+      "su *": "deny"
+    }
+  }
+}

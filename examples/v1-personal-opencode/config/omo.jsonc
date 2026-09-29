@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/omo.schema.json",
+
+  "telemetry": false,
+
+  "disabled_hooks": [
+    "auto-update-checker"
+  ],
+
+  "[opencode]": {
+    "agents": {
+      "librarian": {
+        "model": "personal/coder"
+      },
+      "explore": {
+        "model": "personal/coder"
+      },
+      "plan-consultant": {
+        "model": "personal/coder"
+      },
+      "plan-reviewer": {
+        "model": "personal/coder"
+      }
+    },
+
+    "categories": {
+      "quick": {
+        "model": "personal/coder"
+      },
+      "unspecified-low": {
+        "model": "personal/coder"
+      },
+      "unspecified-high": {
+        "model": "personal/coder"
+      }
+    },
+
+    "background_task": {
+      "defaultConcurrency": 3
+    }
+  }
+}
