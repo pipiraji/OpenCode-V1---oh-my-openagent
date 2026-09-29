@@ -489,21 +489,20 @@ export OMO_SEND_ANONYMOUS_TELEMETRY=1
 
  telemetry 허용 여부는 OMO 버전과 회사 개인정보 보호 정책에 맞춰 관리자가 결정해야 합니다.
 
-## 설정 후 확인
+## 설정 확인
 
-현재 wrapper가 두 변수를 실제로 전달하는지 확인합니다.
+현재 wrapper가 두 변수를 설정하는지 소스에서 확인합니다.
 
 ```bash
-personal-opencode env 2>/dev/null \
-  | grep -E 'OMO_(DISABLE_POSTHOG|SEND_ANONYMOUS_TELEMETRY)'
+grep -nE 'OMO_(DISABLE_POSTHOG|SEND_ANONYMOUS_TELEMETRY)' \
+  examples/v1-personal-opencode/bin/personal-opencode
 ```
 
-`personal-opencode env`를 지원하지 않는 wrapper 버전이라면 실행 직전 shell에서 다음처럼 확인할 수 있습니다.
+기대 결과:
 
-```bash
-OMO_DISABLE_POSTHOG=1 \
-OMO_SEND_ANONYMOUS_TELEMETRY=0 \
-personal-opencode
+```text
+export OMO_DISABLE_POSTHOG=1
+export OMO_SEND_ANONYMOUS_TELEMETRY=0
 ```
 
 실제 telemetry 정책은 사용 중인 OMO 버전의 schema와 문서에서 다시 확인해야 합니다.
