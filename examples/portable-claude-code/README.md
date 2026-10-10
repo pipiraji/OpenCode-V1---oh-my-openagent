@@ -62,6 +62,36 @@ claude_install/                       # 통째로 이동 가능, 공유 read-onl
 - 따라서 **config는 `/tmp`, `$HOME/.agents/{skills,rules}`만 링크**로 끌어와 공유(방향: temp → home).
 - 링크는 읽기용. Claude Code가 스킬을 쓰는 기능(플러그인/스킬 관리)을 쓰지 않으면 소스는 그대로 유지됨.
 
+## MCP 서버 설정 (외부 도구 연결)
+Claude Code에 MCP 도구(브라우저·DB·내부 API 등)를 붙이는 설정입니다. 상세는 `doc/MCP 서버에 연결하기.md`, `doc/MCP를 통해 Claude Code를 도구에 연결하기.md`.
+
+### 어디에 두나 — 프로젝트 루트의 `.mcp.json` (project 범위)
+| 범위 | 파일 | 설명 |
+|---|---|---|
+| `project` | **프로젝트(저장소) 루트의 `.mcp.json`** | 저장소에 커밋하면 팀원 전원이 동일 서버 사용 — **이 예제는 이걸 사용** |
+| `local` | `claude mcp add` 기본값 | 사용자+현재 프로젝트 전용(`.mcp.json`은 안 만듦) |
+| `user` | `~/.claude.json`의 `mcpServers` | 모든 프로젝트 — 단, **래퍼가 config를 `/tmp`로 옮기므로 개인 홈을 안 건드린다는 원칙에 어긋남 → 사용 비권장** |
+
+- Claude Code는 **세션 시작 시** `.mcp.json`을 읽습니다 → 추가 후 **세션 재시작** 필요.
+- 첫 연결 시 **승인 프롬프트**가 뜹니다(놓치면 `/mcp` 명령으로 승인/확인).
+
+### 샘플 1개 — 폐쇄망용 로컬 stdio 서버
+```json
+{
+  "mcpServers": {
+    "company-docs": {
+      "type": "stdio",
+      "command": "/opt/company-claude/mcp/company-docs-server",
+      "args": ["--config", "/opt/company-claude/mcp/server-config.json"]
+    }
+  }
+}
+```
+- `type: "stdio"` → 로컬에서 **서브프로세스로 실행**(외부망 불필요). `command`+`args`가 실행 프로그램입니다. 내부 네트워크의 HTTP 서버라면 `{ "type": "http", "url": "http://<내부 호스트>:<포트>/mcp" }` 형식입니다.
+- 폐쇄망에서는 `npx`/`uvx`가 패키지를 못 받으므로 **내부 미러로 설치한 실행 경로**를 `command`에 지정하세요.
+- CLI로 등록하는 대안: `claude mcp add company-docs --scope project -- /opt/.../company-docs-server` (`/mcp`·`claude mcp list`로 관리).
+- 서버 시작이 느리면 `MCP_TIMEOUT`(밀리초, 기본 30000)을 늘립니다: `export MCP_TIMEOUT=120000`.
+
 ## 여러 모델 지정 (`modelPicker`)
 - `/model` 피커에 원하는 모델을 **개수 제한 없이** 이름 붙여 상주시킬 수 있음. settings.json 전용(env/CLI 등가 없음).
 - 배포물을 늘리지 않기 위해 **래퍼가 매 실행 시 `$CLAUDE_CONFIG_DIR/settings.json`을 생성**한다(3단계 래퍼 참조).
@@ -294,3 +324,4 @@ curl -sS http://10.29.248.6:4000/v1/messages \
 - 배포 시: `ANTHROPIC_BASE_URL`·모델 태그를 환경에 맞게 확인, 리스크 2·4·5·6·7 검증.
 - 값 구분: **모델명은 실제 오픈소스 모델명 유지**, **서버 주소·포트·토큰·라우터 정보는 난수 placeholder**.
 - 모델 정렬: **무게순(거대 → 라이트)** `deepseek-coder-v2` > `qwen3-coder` > `mistral-nemo` > `llama3.1` > `gemma4` (피커·라우터 공통). 별칭 서열 fable > opus > sonnet > haiku.
+- MCP: **프로젝트 루트 `.mcp.json`(project 범위)** 사용 — `user` 범위는 `~/.claude.json`에 써서 /tmp 격리에 부적합. 폐쇄망은 로컬 `stdio` 서버 우선.
