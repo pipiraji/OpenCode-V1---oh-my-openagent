@@ -5,7 +5,7 @@
 예제 파일: `bin/claude`(런처), `litellm/config.yaml`(라우터)
 참고 문서: `doc/` (Claude Code 공식 문서 한글판 — `모델 구성.md`, `환경변수.md` 등)
 
-> ⚠ **서버 주소·포트·토큰은 난수 placeholder** 입니다(폐쇄망 실제 값으로 교체). **모델명은 실제 오픈소스 모델명 그대로** 둡니다: `gemma4`, `qwen3-coder`, `llama3.1`, `mistral-nemo`, `deepseek-coder-v2`.
+> ⚠ **서버 주소·포트·토큰은 난수 placeholder** 입니다(폐쇄망 실제 값으로 교체). **모델명은 실제 오픈소스 모델명 그대로** 둡니다(거대 → 라이트 순): `deepseek-coder-v2`, `qwen3-coder`, `mistral-nemo`, `llama3.1`, `gemma4`.
 
 ## 목표
 - 폐쇄망 공용/프로젝트 계정에서 Claude Code를 **내부 LLM에만** 연결해 배포·실행.
@@ -30,11 +30,11 @@
 |---|---|
 | `ANTHROPIC_BASE_URL` | `http://10.29.248.6:4000` (LiteLLM 라우터; A안) |
 | `ANTHROPIC_AUTH_TOKEN` | `sk-router-16a59d11fb4d7a21` (= LiteLLM `general_settings.master_key`) |
-| `ANTHROPIC_MODEL` | `gemma4` (라우터 `model_name`) |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `qwen3-coder` |
-| `ANTHROPIC_DEFAULT_OPUS_MODEL` | `deepseek-coder-v2` |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `gemma4` |
-| `ANTHROPIC_DEFAULT_FABLE_MODEL` | `gemma4` |
+| `ANTHROPIC_MODEL` | `gemma4` (라우터 `model_name`, 기본) |
+| `ANTHROPIC_DEFAULT_FABLE_MODEL` | `deepseek-coder-v2` (가장 거대) |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | `qwen3-coder` |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `mistral-nemo` |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `gemma4` (가장 라이트) |
 | `CLAUDE_CODE_SUBAGENT_MODEL` | `gemma4` |
 | `CLAUDE_CONFIG_DIR` | `/tmp/claude_$USER/claude_config` |
 
@@ -69,6 +69,7 @@ claude_install/                       # 통째로 이동 가능, 공유 read-onl
 - `replaceBuiltInOptions: true` → 내장 Claude 행을 숨기고 이 목록만 표시.
 - 최신 모델을 CC가 모르면 `"behavesAs": "<아는 모델 id>"`로 능력치만 차용.
 - 모델 추가/변경은 래퍼 here-doc의 `options` 배열만 수정.
+- **목록 순서 = 무게순(거대 → 라이트)** 로 정렬해 피커에 표시(현재 `deepseek-coder-v2` → `gemma4`).
 
 **개수 상한:** `modelPicker.options`는 문서상 제한 없음. (env만 쓸 경우 별칭 `sonnet`/`opus`/`haiku`/`fable` 4개 + `ANTHROPIC_CUSTOM_MODEL_OPTION` 1개 = 약 5개가 한계. 게이트웨이 자동 발견 `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`는 **id에 `claude`/`anthropic`이 든 것만** 채택하므로 Ollama `gemma4`는 걸러져 사용 불가.)
 
@@ -81,38 +82,38 @@ Claude Code의 엔드포인트/토큰은 **전역 1개**(`ANTHROPIC_BASE_URL`/`A
 
 | 모델 | URL | 토큰 |
 |---|---|---|
-| `gemma4` | `http://10.203.201.25:8000` | `sk-a1296e4ca349babe929e9ff99e9514bb` |
-| `qwen3-coder` | `http://10.101.160.238:8080` | (없음) |
-| `llama3.1` | `http://10.228.83.6:8080` | `sk-6e53e0363a9cb445e1b035ab4db01473` |
-| `mistral-nemo` | `http://10.102.102.245:8080` | `sk-6df396f8e01935fda71ceb4b80bf5ee3` |
 | `deepseek-coder-v2` | `http://10.160.110.124:11434` | `sk-c36baf52d4f479647948e526f963b021` |
+| `qwen3-coder` | `http://10.101.160.238:8080` | (없음) |
+| `mistral-nemo` | `http://10.102.102.245:8080` | `sk-6df396f8e01935fda71ceb4b80bf5ee3` |
+| `llama3.1` | `http://10.228.83.6:8080` | `sk-6e53e0363a9cb445e1b035ab4db01473` |
+| `gemma4` | `http://10.203.201.25:8000` | `sk-a1296e4ca349babe929e9ff99e9514bb` |
 
 ### A) 라우터(프록시) 1개 앞단에 — 래퍼 1개 유지 **(채택)**
 - Claude Code는 라우터 **한 곳**만 봄. 모델별 `api_base`/`api_key`는 라우터 설정에 두고 **모델 ID 문자열로 라우팅**.
 - 래퍼 변경: `ANTHROPIC_BASE_URL`→라우터, `ANTHROPIC_AUTH_TOKEN`→라우터 키. `modelPicker.options`는 라우터의 모델명 목록.
 - 설정 파일: **`litellm/config.yaml`** (이 예제에 포함). 래퍼: **`bin/claude`**.
 ```yaml
-# LiteLLM 예시 (폐쇄망 반입 필요: pip 휠 vendoring)
+# LiteLLM 예시 (폐쇄망 반입 필요: pip 휠 vendoring) — model_list 순서 = 무게순(거대 → 라이트)
 model_list:
-  - model_name: gemma4
-    litellm_params: { model: ollama/gemma4, api_base: http://10.203.201.25:8000, api_key: sk-a1296e4ca349babe929e9ff99e9514bb }
-  - model_name: qwen3-coder
-    litellm_params: { model: ollama/qwen3-coder, api_base: http://10.101.160.238:8080 }
-  - model_name: llama3.1
-    litellm_params: { model: ollama/llama3.1, api_base: http://10.228.83.6:8080, api_key: sk-6e53e0363a9cb445e1b035ab4db01473 }
-  - model_name: mistral-nemo
-    litellm_params: { model: ollama/mistral-nemo, api_base: http://10.102.102.245:8080, api_key: sk-6df396f8e01935fda71ceb4b80bf5ee3 }
   - model_name: deepseek-coder-v2
     litellm_params: { model: ollama/deepseek-coder-v2, api_base: http://10.160.110.124:11434, api_key: sk-c36baf52d4f479647948e526f963b021 }
+  - model_name: qwen3-coder
+    litellm_params: { model: ollama/qwen3-coder, api_base: http://10.101.160.238:8080 }
+  - model_name: mistral-nemo
+    litellm_params: { model: ollama/mistral-nemo, api_base: http://10.102.102.245:8080, api_key: sk-6df396f8e01935fda71ceb4b80bf5ee3 }
+  - model_name: llama3.1
+    litellm_params: { model: ollama/llama3.1, api_base: http://10.228.83.6:8080, api_key: sk-6e53e0363a9cb445e1b035ab4db01473 }
+  - model_name: gemma4
+    litellm_params: { model: ollama/gemma4, api_base: http://10.203.201.25:8000, api_key: sk-a1296e4ca349babe929e9ff99e9514bb }
 ```
 ```jsonc
 // 래퍼가 생성하는 settings.json 의 modelPicker (라우터 model_name 과 일치)
 { "modelPicker": { "replaceBuiltInOptions": true, "options": [
-  { "model": "gemma4",            "label": "Gemma4" },
+  { "model": "deepseek-coder-v2", "label": "DeepSeek Coder V2" },
   { "model": "qwen3-coder",       "label": "Qwen3 Coder" },
-  { "model": "llama3.1",          "label": "Llama 3.1" },
   { "model": "mistral-nemo",      "label": "Mistral Nemo" },
-  { "model": "deepseek-coder-v2", "label": "DeepSeek Coder V2" }
+  { "model": "llama3.1",          "label": "Llama 3.1" },
+  { "model": "gemma4",            "label": "Gemma4" }
 ] } }
 ```
 ```bash
@@ -190,11 +191,11 @@ cat > "$CLAUDE_CONFIG_DIR/settings.json" <<'JSON'
   "modelPicker": {
     "replaceBuiltInOptions": true,
     "options": [
-      { "model": "gemma4",            "label": "Gemma4" },
+      { "model": "deepseek-coder-v2", "label": "DeepSeek Coder V2" },
       { "model": "qwen3-coder",       "label": "Qwen3 Coder" },
-      { "model": "llama3.1",          "label": "Llama 3.1" },
       { "model": "mistral-nemo",      "label": "Mistral Nemo" },
-      { "model": "deepseek-coder-v2", "label": "DeepSeek Coder V2" }
+      { "model": "llama3.1",          "label": "Llama 3.1" },
+      { "model": "gemma4",            "label": "Gemma4" }
     ]
   }
 }
@@ -210,12 +211,13 @@ export ANTHROPIC_BASE_URL="http://10.29.248.6:4000"
 export ANTHROPIC_AUTH_TOKEN="sk-router-16a59d11fb4d7a21"   # = litellm general_settings.master_key
 export ANTHROPIC_MODEL="gemma4"
 
-# Claude Code 내부 별칭 / 서브에이전트 모델 → 라우터 model_name 매핑 (난수 예시 — 환경에 맞게 조정)
-export ANTHROPIC_DEFAULT_SONNET_MODEL="qwen3-coder"       # sonnet (opusplan 비플랜)
-export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-coder-v2"   # opus   (opusplan 플랜)
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="gemma4"             # haiku / 백그라운드 기능
-export ANTHROPIC_DEFAULT_FABLE_MODEL="gemma4"             # fable  (자동 폴백)
-export CLAUDE_CODE_SUBAGENT_MODEL="gemma4"                # 서브에이전트 / 에이전트팀 기본
+# Claude Code 내부 별칭 / 서브에이전트 모델 → 라우터 model_name 매핑
+#   서열(거대 → 라이트): fable > opus > sonnet > haiku  (모델 목록도 같은 순서)
+export ANTHROPIC_DEFAULT_FABLE_MODEL="deepseek-coder-v2"   # fable  (가장 어려운/긴 작업)
+export ANTHROPIC_DEFAULT_OPUS_MODEL="qwen3-coder"          # opus   (복잡한 추론 / opusplan 플랜)
+export ANTHROPIC_DEFAULT_SONNET_MODEL="mistral-nemo"       # sonnet (일상 코딩 / opusplan 비플랜)
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="gemma4"              # haiku  (간단·빠른 작업 / 백그라운드)
+export CLAUDE_CODE_SUBAGENT_MODEL="gemma4"                 # 서브에이전트 / 에이전트팀 기본
 
 # 느린 로컬 모델 최적화: 타임아웃 확대 / 5분 본문 유휴 타임아웃 해제
 export API_TIMEOUT_MS=1200000                         # 요청 타임아웃 20분 (기본 10분)
@@ -291,3 +293,4 @@ curl -sS http://10.29.248.6:4000/v1/messages \
 - 다중 모델: **`modelPicker`를 래퍼가 매 실행 시 `settings.json`으로 생성** (env 상한 ~5개 회피, 개수 무제한).
 - 배포 시: `ANTHROPIC_BASE_URL`·모델 태그를 환경에 맞게 확인, 리스크 2·4·5·6·7 검증.
 - 값 구분: **모델명은 실제 오픈소스 모델명 유지**, **서버 주소·포트·토큰·라우터 정보는 난수 placeholder**.
+- 모델 정렬: **무게순(거대 → 라이트)** `deepseek-coder-v2` > `qwen3-coder` > `mistral-nemo` > `llama3.1` > `gemma4` (피커·라우터 공통). 별칭 서열 fable > opus > sonnet > haiku.

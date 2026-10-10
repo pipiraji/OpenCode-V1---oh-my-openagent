@@ -59,11 +59,11 @@ cat > "$CONFIG_DIR/settings.json" <<'JSON'
   "modelPicker": {
     "replaceBuiltInOptions": true,
     "options": [
-      { "model": "gemma4",            "label": "Gemma4" },
+      { "model": "deepseek-coder-v2", "label": "DeepSeek Coder V2" },
       { "model": "qwen3-coder",       "label": "Qwen3 Coder" },
-      { "model": "llama3.1",          "label": "Llama 3.1" },
       { "model": "mistral-nemo",      "label": "Mistral Nemo" },
-      { "model": "deepseek-coder-v2", "label": "DeepSeek Coder V2" }
+      { "model": "llama3.1",          "label": "Llama 3.1" },
+      { "model": "gemma4",            "label": "Gemma4" }
     ]
   }
 }
@@ -79,12 +79,13 @@ export ANTHROPIC_BASE_URL="$ROUTER_URL"
 export ANTHROPIC_AUTH_TOKEN="$ROUTER_TOKEN"
 export ANTHROPIC_MODEL="$MODEL"
 
-# Claude Code 내부 별칭 / 서브에이전트 모델 → 라우터 model_name 매핑 (난수 예시 — 환경에 맞게 조정)
-export ANTHROPIC_DEFAULT_SONNET_MODEL="qwen3-coder"       # sonnet (opusplan 비플랜)
-export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-coder-v2"   # opus   (opusplan 플랜)
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="gemma4"             # haiku / 백그라운드 기능
-export ANTHROPIC_DEFAULT_FABLE_MODEL="gemma4"             # fable  (자동 폴백)
-export CLAUDE_CODE_SUBAGENT_MODEL="gemma4"                # 서브에이전트 / 에이전트팀 기본
+# Claude Code 내부 별칭 / 서브에이전트 모델 → 라우터 model_name 매핑
+#   서열(거대 → 라이트): fable > opus > sonnet > haiku  (모델 목록도 같은 순서)
+export ANTHROPIC_DEFAULT_FABLE_MODEL="deepseek-coder-v2"   # fable  (가장 어려운/긴 작업)
+export ANTHROPIC_DEFAULT_OPUS_MODEL="qwen3-coder"          # opus   (복잡한 추론 / opusplan 플랜)
+export ANTHROPIC_DEFAULT_SONNET_MODEL="mistral-nemo"       # sonnet (일상 코딩 / opusplan 비플랜)
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="gemma4"              # haiku  (간단·빠른 작업 / 백그라운드)
+export CLAUDE_CODE_SUBAGENT_MODEL="gemma4"                 # 서브에이전트 / 에이전트팀 기본
 
 # 느린 로컬 모델 최적화: 타임아웃 확대 / 5분 본문 유휴 타임아웃 해제
 export API_TIMEOUT_MS=1200000                         # 요청 타임아웃 20분 (기본 10분)
