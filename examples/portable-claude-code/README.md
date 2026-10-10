@@ -43,10 +43,14 @@
 
 ## 디렉토리 구조
 ```
-claude_install/                       # 통째로 이동 가능, 공유 read-only 가능
-├── claude                            # 런처(wrapper) — PATH에 이 디렉토리를 추가
-└── claude-code/
-    └── bin/claude.exe                # 네이티브 바이너리(자체 완결, 이 내부 경로는 패키지 고정)
+/opt/company-claude/                   # 배포 루트 (관리자 설치)
+├── claude_install/                    # Claude Code — 통째로 이동 가능, 공유 read-only 가능
+│   ├── claude                          # 런처(wrapper) — PATH에 이 디렉토리를 추가
+│   └── claude-code/
+│       └── bin/claude.exe              # 네이티브 바이너리(자체 완결, 이 내부 경로는 패키지 고정)
+└── litellm/
+    ├── venv/                           # LiteLLM (폐쇄망: pip 휠 vendoring)
+    └── config.yaml                     # ★ 모델별 URL/토큰 단일 소스 (= 이 저장소의 litellm/config.yaml)
 
 /tmp/claude_<계정>/claude_config/      # = CLAUDE_CONFIG_DIR (런타임, 휘발)
 ├── skills -> $HOME/.agents/skills     # 공유(링크, 읽기용) — OpenCode와 동일 소스
@@ -56,7 +60,7 @@ claude_install/                       # 통째로 이동 가능, 공유 read-onl
 ```
 
 ## 공유 스킬/룰 (OpenCode 호환) — 왜 config=temp + 링크인가
-- Claude Code는 스킬/룰을 `$CLAUDE_CONFIG_DIR/skills`, `$CLAUDE_CONFIG_DIR/rules`에서 읽음.
+- Claude Code는 사용자 스킬/룰을 `~/.claude/skills`·`~/.claude/rules`에서 읽고, `CLAUDE_CONFIG_DIR`이 `~/.claude`를 대체하므로 **실제 위치는 `$CLAUDE_CONFIG_DIR/skills`·`$CLAUDE_CONFIG_DIR/rules`**.
 - OpenCode도 `$HOME/.agents/skills/*/SKILL.md`를 읽음 → **같은 소스를 공유** 가능.
 - config 자체를 `~/.agents`로 두면 런타임 파일(`settings.json`·`plugins/`·`sessions/`·`history.jsonl` 등)이 공유 디렉토리를 오염시키고, `agents/`·`commands/` 포맷 충돌·홈 쿼터 위험이 있음.
 - 따라서 **config는 `/tmp`, `$HOME/.agents/{skills,rules}`만 링크**로 끌어와 공유(방향: temp → home).
@@ -68,10 +72,12 @@ Claude Code에 MCP 도구(브라우저·DB·내부 API 등)를 붙이는 설정�
 ### 어디에 두나 — 프로젝트 루트의 `.mcp.json` (project 범위)
 | 범위 | 파일 | 설명 |
 |---|---|---|
-| `project` | **프로젝트(저장소) 루트의 `.mcp.json`** | 저장소에 커밋하면 팀원 전원이 동일 서버 사용 — **이 예제는 이걸 사용** |
-| `local` | `claude mcp add` 기본값 | 사용자+현재 프로젝트 전용(`.mcp.json`은 안 만듦) |
-| `user` | `~/.claude.json`의 `mcpServers` | 모든 프로젝트 — 단, **래퍼가 config를 `/tmp`로 옮기므로 개인 홈을 안 건드린다는 원칙에 어긋남 → 사용 비권장** |
+| `project` | **프로젝트(저장소) 루트의 `.mcp.json`** | `claude`를 실행하는 **작업 디렉터리(= 코드 저장소 루트)**. 커밋하면 팀원 전원 공유 — **이 예제는 이걸 사용** |
+| `local` | `~/.claude.json` (이 프로젝트 항목) | 사용자+현재 프로젝트 전용. `claude mcp add` 기본값 |
+| `user` | `~/.claude.json` (최상위 `mcpServers`) | 모든 프로젝트 — **비권장** |
 
+- `.mcp.json` 위치는 **설치 경로(`/opt/company-claude`)나 `CLAUDE_CONFIG_DIR`와 무관**합니다 — 어디서 `claude`를 실행하든 그 **프로젝트 루트** 기준입니다.
+- `local`/`user`가 쓰는 `~/.claude.json`은 `CLAUDE_CONFIG_DIR` 설정 시 **`$CLAUDE_CONFIG_DIR/.claude.json`(= `/tmp`, 휘발)** 로 바뀝니다 → 그래서 **프로젝트 `.mcp.json`(영속)** 을 권장합니다.
 - Claude Code는 **세션 시작 시** `.mcp.json`을 읽습니다 → 추가 후 **세션 재시작** 필요.
 - 첫 연결 시 **승인 프롬프트**가 뜹니다(놓치면 `/mcp` 명령으로 승인/확인).
 
@@ -271,7 +277,24 @@ exec "$HERE/claude-code/bin/claude.exe" \
 export PATH="/opt/company-claude/claude_install:$PATH"
 ```
 
-### 5) 연결 검증
+### 5) 라우터(LiteLLM) — `litellm/config.yaml` 위치·실행
+설정 파일은 **`claude_install`과 형제인 `litellm/` 디렉터리**에 둡니다(이 저장소에서는 `litellm/config.yaml`).
+```bash
+# 폐쇄망: pip 휠을 미리 반입해 venv에 설치
+python3 -m venv /opt/company-claude/litellm/venv
+/opt/company-claude/litellm/venv/bin/pip install --no-index --find-links ./wheels 'litellm[proxy]'
+
+# 이 저장소의 설정을 배포 위치로 복사 (= 모델별 URL/토큰의 단일 소스)
+install -D -m 600 litellm/config.yaml /opt/company-claude/litellm/config.yaml
+
+# 실행: --config 경로를 명시 (포트는 bin/claude 의 CLAUDE_ROUTER_URL 과 일치해야 함)
+/opt/company-claude/litellm/venv/bin/litellm --config /opt/company-claude/litellm/config.yaml --port 4000
+```
+- 모델 추가/변경은 `config.yaml`의 `model_list`만 수정 → 라우터 재시작.
+- 상시 구동은 systemd 등록 권장: `ExecStart=/opt/company-claude/litellm/venv/bin/litellm --config /opt/company-claude/litellm/config.yaml --port 4000`.
+- 검증: 아래 6)의 `curl`.
+
+### 6) 연결 검증
 ```bash
 # 라우터(Anthropic /v1/messages)로 모델 라우팅까지 확인
 curl -sS http://10.29.248.6:4000/v1/messages \
@@ -319,9 +342,9 @@ curl -sS http://10.29.248.6:4000/v1/messages \
 - 다중 서버(모델별 URL/토큰): **라우터(LiteLLM) 1개를 앞단에 두는 A안 채택** (B안=래퍼 분리는 대안).
 - 배포 위치: **`/opt/company-claude/claude_install`** (홈 밖 공유 경로).
 - 데이터 영속성: **`/tmp` 휘발** (세션·기록 미보존).
-- 공유 스킬/룰: **`/tmp` config + `$HOME/.agents/{skills,rules}` 링크** (OpenCode 호환, 홈 오염 없음).
+- 공유 스킬/룰: **`$CLAUDE_CONFIG_DIR/skills`·`$CLAUDE_CONFIG_DIR/rules`**(=`/tmp/claude_$USER/claude_config` 밑)를 `$HOME/.agents/{skills,rules}`로 **링크** (OpenCode 호환, 홈 오염 없음).
 - 다중 모델: **`modelPicker`를 래퍼가 매 실행 시 `settings.json`으로 생성** (env 상한 ~5개 회피, 개수 무제한).
 - 배포 시: `ANTHROPIC_BASE_URL`·모델 태그를 환경에 맞게 확인, 리스크 2·4·5·6·7 검증.
 - 값 구분: **모델명은 실제 오픈소스 모델명 유지**, **서버 주소·포트·토큰·라우터 정보는 난수 placeholder**.
 - 모델 정렬: **무게순(거대 → 라이트)** `deepseek-coder-v2` > `qwen3-coder` > `mistral-nemo` > `llama3.1` > `gemma4` (피커·라우터 공통). 별칭 서열 fable > opus > sonnet > haiku.
-- MCP: **프로젝트 루트 `.mcp.json`(project 범위)** 사용 — `user` 범위는 `~/.claude.json`에 써서 /tmp 격리에 부적합. 폐쇄망은 로컬 `stdio` 서버 우선.
+- MCP: **프로젝트(저장소) 루트의 `.mcp.json`(project 범위)** 사용 — `local`/`user` 범위는 `~/.claude.json`(=`CLAUDE_CONFIG_DIR` 설정 시 `/tmp`로 가 휘발)이라 부적합. 폐쇄망은 로컬 `stdio` 서버 우선.
