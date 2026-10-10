@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# ============================================================================
+# 포터블 Claude Code 런처 (폐쇄망 · 내부 LLM 전용, A안)
+#
+# 모델마다 서버/토큰이 다른 환경을 전제로, Claude Code는 LiteLLM 라우터 한 곳에만
+# 연결합니다. 모델별 api_base/api_key는 라우터(litellm/config.yaml)가 처리하고,
+# Claude Code는 model_name(모델 ID)으로 라우팅합니다.
+#
+# ⚠ 라우터 주소·토큰 등 접속 정보는 난수 placeholder 입니다. 회사(폐쇄망)에서 실제 값으로 교체하세요.
+#   모델명(model_name)과 별칭 매핑은 실제 오픈소스 모델명을 그대로 사용합니다.
+#
+# [Wrapper 전용 변수]
+#   COMPANY_CLAUDE_ROOT   설치 루트 (기본: 이 스크립트의 디렉터리)
+#   CLAUDE_CONFIG_DIR     런타임 config (기본: /tmp/claude_$USER/claude_config, 휘발)
+#   CLAUDE_ROUTER_URL     LiteLLM 라우터 주소 (기본: http://10.29.248.6:4000)
+#   CLAUDE_ROUTER_TOKEN   라우터 키 = LiteLLM master_key (기본: sk-router-16a59d11fb4d7a21)
+#   CLAUDE_MODEL          기본 모델 = 라우터 model_name (기본: gemma4)
+#   CLAUDE_AGENTS_DIR     공유 스킬/룰 소스 (기본: $HOME/.agents)
+#
+# [Claude Code가 읽는 표준 변수]
+#   CLAUDE_CONFIG_DIR
+#   ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL
+#   ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL / CLAUDE_CODE_SUBAGENT_MODEL
+#   DISABLE_UPDATES / DISABLE_AUTOUPDATER / CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+# ============================================================================
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${COMPANY_CLAUDE_ROOT:-$HERE}"
+BINARY="$ROOT/claude-code/bin/claude.exe"
+
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/tmp/claude_$USER/claude_config}"
+ROUTER_URL="${CLAUDE_ROUTER_URL:-http://10.29.248.6:4000}"
+ROUTER_TOKEN="${CLAUDE_ROUTER_TOKEN:-sk-router-16a59d11fb4d7a21}"
+MODEL="${CLAUDE_MODEL:-gemma4}"
+AGENTS_DIR="${CLAUDE_AGENTS_DIR:-$HOME/.agents}"
+
+if [[ ! -x "$BINARY" ]]; then
+  echo "Claude Code 실행파일을 찾지 못했거나 실행할 수 없습니다: $BINARY" >&2
+  echo "COMPANY_CLAUDE_ROOT 또는 claude_install 구성을 확인하세요." >&2
+  exit 69
+fi
+
+install -d -m 700 "$CONFIG_DIR"
+
+# 공유 스킬/룰 링크 (OpenCode와 동일 소스: $AGENTS_DIR) — 읽기용
+for d in skills rules; do
+  src="$AGENTS_DIR/$d"
+  [[ -d "$src" ]] || continue
+  dst="$CONFIG_DIR/$d"
+  [[ -L "$dst" || ! -e "$dst" ]] || rm -rf "$dst"   # 기존 실제 디렉토리면 교체(안 하면 그 안에 링크 생성)
+  ln -sfn "$src" "$dst"
+done
+
+# 모델 피커(settings.json 전용) — 배포물이 아니라 매 실행 시 생성, 라우터 model_name 과 일치
+cat > "$CONFIG_DIR/settings.json" <<'JSON'
+{
+  "modelPicker": {
+    "replaceBuiltInOptions": true,
+    "options": [
+      { "model": "gemma4",            "label": "Gemma4" },
+      { "model": "qwen3-coder",       "label": "Qwen3 Coder" },
+      { "model": "llama3.1",          "label": "Llama 3.1" },
+      { "model": "mistral-nemo",      "label": "Mistral Nemo" },
+      { "model": "deepseek-coder-v2", "label": "DeepSeek Coder V2" }
+    ]
+  }
+}
+JSON
+
+# 외부 트래픽·업데이트 차단
+export DISABLE_UPDATES=1
+export DISABLE_AUTOUPDATER=1
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
+# 내부 LLM: LiteLLM 라우터 1곳 (모델별 서버/토큰은 라우터가 처리)
+export ANTHROPIC_BASE_URL="$ROUTER_URL"
+export ANTHROPIC_AUTH_TOKEN="$ROUTER_TOKEN"
+export ANTHROPIC_MODEL="$MODEL"
+
+# Claude Code 내부 별칭 / 서브에이전트 모델 → 라우터 model_name 매핑 (난수 예시 — 환경에 맞게 조정)
+export ANTHROPIC_DEFAULT_SONNET_MODEL="qwen3-coder"       # sonnet (opusplan 비플랜)
+export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-coder-v2"   # opus   (opusplan 플랜)
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="gemma4"             # haiku / 백그라운드 기능
+export ANTHROPIC_DEFAULT_FABLE_MODEL="gemma4"             # fable  (자동 폴백)
+export CLAUDE_CODE_SUBAGENT_MODEL="gemma4"                # 서브에이전트 / 에이전트팀 기본
+
+# 느린 로컬 모델 최적화: 타임아웃 확대 / 5분 본문 유휴 타임아웃 해제
+export API_TIMEOUT_MS=1200000                         # 요청 타임아웃 20분 (기본 10분)
+export API_FORCE_IDLE_TIMEOUT=0                        # 청크 사이 5분 유휴 타임아웃 끔
+export CLAUDE_STREAM_IDLE_TIMEOUT_MS=600000            # 스트림 정체 타임아웃 10분
+# (선택) 커스텀 모델 ID의 컨텍스트 윈도우 보정 — 라우터 모델과 다르면 지정
+# export CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072
+
+# permissions (settings.json 대신 CLI 플래그)
+exec "$BINARY" \
+  --permission-mode default \
+  --allowedTools "Bash(git status *)" "Bash(git diff *)" \
+  --disallowedTools "Bash(git push *)" "Bash(sudo *)" "Read(./.env)" \
+  "$@"

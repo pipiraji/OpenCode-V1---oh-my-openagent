@@ -1,0 +1,73 @@
+# LiteLLM 라우터 설정 (A안) — 모델별 URL/토큰의 "단일 진실 소스"
+#
+# Claude Code 는 엔드포인트/토큰이 전역 1개뿐이라 모델별로 못 나눈다.
+# 그래서 Claude Code → 이 라우터(ANTHROPIC_BASE_URL) 한 곳 → 모델별 Ollama 서버/토큰.
+# 모델을 추가/변경하려면 이 파일의 model_list 만 고치면 된다.
+#
+# ⚠ 서버 주소/토큰은 난수 placeholder 입니다. 회사(폐쇄망)에서 실제 값으로 교체하세요.
+#   model_name 은 실제 오픈소스 모델명을 그대로 사용합니다
+#   (gemma4 / qwen3-coder / llama3.1 / mistral-nemo / deepseek-coder-v2).
+#
+# 실행 예:
+#   litellm --config litellm/config.yaml --port 4000
+# Claude Code 연결 (bin/claude 기본값과 일치):
+#   ANTHROPIC_BASE_URL=http://10.29.248.6:4000
+#   ANTHROPIC_AUTH_TOKEN=<아래 general_settings.master_key>
+
+model_list:
+  - model_name: gemma4                       # Claude Code 가 보내는 model ID
+    litellm_params:
+      model: ollama/gemma4                   # 실제 백엔드 (Ollama)
+      api_base: http://10.203.201.25:8000    # ← 모델별 URL
+      api_key: sk-a1296e4ca349babe929e9ff99e9514bb
+    model_info:
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+
+  - model_name: qwen3-coder
+    litellm_params:
+      model: ollama/qwen3-coder
+      api_base: http://10.101.160.238:8080
+    model_info:                              # 토큰 없는 서버는 api_key 생략
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+
+  - model_name: llama3.1
+    litellm_params:
+      model: ollama/llama3.1
+      api_base: http://10.228.83.6:8080
+      api_key: sk-6e53e0363a9cb445e1b035ab4db01473
+    model_info:
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+
+  - model_name: mistral-nemo
+    litellm_params:
+      model: ollama/mistral-nemo
+      api_base: http://10.102.102.245:8080
+      api_key: sk-6df396f8e01935fda71ceb4b80bf5ee3
+    model_info:
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+
+  - model_name: deepseek-coder-v2
+    litellm_params:
+      model: ollama/deepseek-coder-v2
+      api_base: http://10.160.110.124:11434
+      api_key: sk-c36baf52d4f479647948e526f963b021
+    model_info:
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+
+litellm_settings:
+  # Claude Code 가 보내는 Anthropic 요청 중 백엔드가 모르는 파라미터를 제거
+  drop_params: true
+
+router_settings:
+  # 느린 로컬 모델 최적화: 생성이 끝날 때까지 기다린다(초). 기본이 짧으면 중간에 끊긴다.
+  timeout: 600
+  num_retries: 2
+
+general_settings:
+  # bin/claude 의 CLAUDE_ROUTER_TOKEN(= ANTHROPIC_AUTH_TOKEN) 값과 동일하게 맞춘다.
+  master_key: sk-router-16a59d11fb4d7a21
