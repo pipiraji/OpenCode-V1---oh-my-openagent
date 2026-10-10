@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "company-docs": {
+      "type": "stdio",
+      "command": "/opt/company-claude/mcp/company-docs-server",
+      "args": ["--config", "/opt/company-claude/mcp/server-config.json"]
+    }
+  }
+}

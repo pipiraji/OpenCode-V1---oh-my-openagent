@@ -2,7 +2,7 @@
 
 작성일: 2026-10-10
 상태: **확정(final)** — 내부 LLM(Ollama) + **LiteLLM 라우터(A안)** / `/opt` 공유 경로 / `/tmp` 휘발 / 공유 스킬·룰은 `~/.agents` 링크
-예제 파일: `bin/claude`(런처), `litellm/config.yaml`(라우터)
+예제 파일: `bin/claude`(런처), `bin/mcp.json`(MCP 설정 소스), `litellm/config.yaml`(라우터)
 참고 문서: `doc/` (Claude Code 공식 문서 한글판 — `모델 구성.md`, `환경변수.md` 등)
 
 > ⚠ **서버 주소·포트·토큰은 난수 placeholder** 입니다(폐쇄망 실제 값으로 교체). **모델명은 실제 오픈소스 모델명 그대로** 둡니다(거대 → 라이트 순): `deepseek-coder-v2`, `qwen3-coder`, `mistral-nemo`, `llama3.1`, `gemma4`.
@@ -17,7 +17,7 @@
 - 설정/세션/자격증명/플러그인은 `CLAUDE_CONFIG_DIR` 하나로 이동 (OpenCode의 XDG 다중 변수보다 단순).
 - model·provider·업데이트 차단·네트워크는 **전부 환경변수**로.
 - permissions는 settings.json 대신 **CLI 플래그**(`--allowedTools`/`--disallowedTools`/`--permission-mode`).
-- `settings.json`은 배포하지 않고 **래퍼가 매 실행 시 생성** — 다중 모델 피커(`modelPicker`) 전용.
+- `settings.json`·`mcp.json`은 배포하지 않고 **래퍼가 매 실행 시 `/tmp`에 생성** — 모델 피커(`modelPicker`)와 MCP(소스 `claude_install/mcp.json` → `--mcp-config`).
 - 설치: npm(내부 미러) 글로벌 설치 → 프로젝트 `claude_install/`로 `cp -a` vendoring.
 - 바이너리는 `bin/claude.exe`가 자체 완결(네이티브) → 플랫폼 패키지 복사 불필요.
 - **프로토콜: Ollama** (Anthropic `/v1/messages` 네이티브). 모델별 서버/토큰이 달라 **앞단에 LiteLLM 라우터 1개**를 둠(A안, "여러 서버 라우팅"). 단일 서버만 쓰면 라우터 없이 바로 Ollama에 연결 가능.
@@ -46,13 +46,16 @@
 /opt/company-claude/                   # 배포 루트 (관리자 설치)
 ├── claude_install/                    # Claude Code — 통째로 이동 가능, 공유 read-only 가능
 │   ├── claude                          # 런처(wrapper) — PATH에 이 디렉토리를 추가
+│   ├── mcp.json                        # MCP 설정 소스 (= 이 저장소의 bin/mcp.json) → 매 실행 config 로 복사
 │   └── claude-code/
 │       └── bin/claude.exe              # 네이티브 바이너리(자체 완결, 이 내부 경로는 패키지 고정)
 └── litellm/
     ├── venv/                           # LiteLLM (폐쇄망: pip 휠 vendoring)
     └── config.yaml                     # ★ 모델별 URL/토큰 단일 소스 (= 이 저장소의 litellm/config.yaml)
 
-/tmp/claude_<계정>/claude_config/      # = CLAUDE_CONFIG_DIR (런타임, 휘발)
+/tmp/claude_<계정>/claude_config/      # = CLAUDE_CONFIG_DIR (런타임, 휘발) — 매 실행 신규 생성
+├── settings.json                       # 래퍼가 매 실행 생성 (modelPicker)
+├── mcp.json                            # 래퍼가 매 실행 생성 (MCP, --mcp-config 로 읽힘)
 ├── skills -> $HOME/.agents/skills     # 공유(링크, 읽기용) — OpenCode와 동일 소스
 ├── rules  -> $HOME/.agents/rules      # 공유(링크, 읽기용)
 ├── plugins/                          # (선택) 또는 CLAUDE_CODE_PLUGIN_DIRS 사용
@@ -69,20 +72,13 @@
 ## MCP 서버 설정 (외부 도구 연결)
 Claude Code에 MCP 도구(브라우저·DB·내부 API 등)를 붙이는 설정입니다. 상세는 `doc/MCP 서버에 연결하기.md`, `doc/MCP를 통해 Claude Code를 도구에 연결하기.md`.
 
-### 어디에 두나 — 프로젝트 루트의 `.mcp.json` (project 범위)
-| 범위 | 파일 | 설명 |
-|---|---|---|
-| `project` | **프로젝트(저장소) 루트의 `.mcp.json`** | `claude`를 실행하는 **작업 디렉터리(= 코드 저장소 루트)**. 커밋하면 팀원 전원 공유 — **이 예제는 이걸 사용** |
-| `local` | `~/.claude.json` (이 프로젝트 항목) | 사용자+현재 프로젝트 전용. `claude mcp add` 기본값 |
-| `user` | `~/.claude.json` (최상위 `mcpServers`) | 모든 프로젝트 — **비권장** |
-
-- `.mcp.json` 위치는 **설치 경로(`/opt/company-claude`)나 `CLAUDE_CONFIG_DIR`와 무관**합니다 — 어디서 `claude`를 실행하든 그 **프로젝트 루트** 기준입니다.
-- `local`/`user`가 쓰는 `~/.claude.json`은 `CLAUDE_CONFIG_DIR` 설정 시 **`$CLAUDE_CONFIG_DIR/.claude.json`(= `/tmp`, 휘발)** 로 바뀝니다 → 그래서 **프로젝트 `.mcp.json`(영속)** 을 권장합니다.
-- Claude Code는 **세션 시작 시** `.mcp.json`을 읽습니다 → 추가 후 **세션 재시작** 필요.
-- 첫 연결 시 **승인 프롬프트**가 뜹니다(놓치면 `/mcp` 명령으로 승인/확인).
-
-### 샘플 1개 — 폐쇄망용 로컬 stdio 서버
-```json
+### 채택 방식 — 래퍼가 매 실행 시 `$CLAUDE_CONFIG_DIR/mcp.json` 생성 → `--mcp-config` 로 읽힘
+- **소스(설치 디렉토리)**: `claude_install/mcp.json` (= 이 저장소의 **`bin/mcp.json`**) — 관리자는 여기 한 곳만 관리.
+- **런타임 생성**: 래퍼가 매 실행 시 소스를 **`$CLAUDE_CONFIG_DIR/mcp.json`(= `/tmp`, 휘발)로 새로 복사**.
+- **읽기**: `claude.exe --mcp-config "$CLAUDE_CONFIG_DIR/mcp.json"` 로 전달(기존 MCP 설정과 **병합**). 래퍼 설정만 쓰려면 exec 에 `--strict-mcp-config` 추가.
+- 내용 수정은 **소스(`bin/mcp.json`)만** 고치면 됨 → 다음 실행에 그대로 반영.
+```jsonc
+// claude_install/mcp.json  (설치 디렉토리, 소스)
 {
   "mcpServers": {
     "company-docs": {
@@ -93,10 +89,22 @@ Claude Code에 MCP 도구(브라우저·DB·내부 API 등)를 붙이는 설정�
   }
 }
 ```
-- `type: "stdio"` → 로컬에서 **서브프로세스로 실행**(외부망 불필요). `command`+`args`가 실행 프로그램입니다. 내부 네트워크의 HTTP 서버라면 `{ "type": "http", "url": "http://<내부 호스트>:<포트>/mcp" }` 형식입니다.
+- `type: "stdio"` → 로컬에서 **서브프로세스로 실행**(외부망 불필요). 내부 HTTP 서버면 `{ "type": "http", "url": "http://<내부 호스트>:<포트>/mcp" }` 형식입니다.
 - 폐쇄망에서는 `npx`/`uvx`가 패키지를 못 받으므로 **내부 미러로 설치한 실행 경로**를 `command`에 지정하세요.
-- CLI로 등록하는 대안: `claude mcp add company-docs --scope project -- /opt/.../company-docs-server` (`/mcp`·`claude mcp list`로 관리).
+- 세션 시작 시 읽음 → 수정 후 **세션 재시작** 필요. 첫 연결 시 **승인 프롬프트**(놓치면 `/mcp`).
 - 서버 시작이 느리면 `MCP_TIMEOUT`(밀리초, 기본 30000)을 늘립니다: `export MCP_TIMEOUT=120000`.
+
+### (대안) 프로젝트 루트 `.mcp.json` — 래퍼 없이 정적으로
+래퍼를 거치지 않거나 프로젝트별로 고정하고 싶을 때. `claude`를 실행하는 **작업 디렉터리(= 코드 저장소) 루트**에 두고 커밋하면 팀원 전원이 공유합니다.
+
+| 범위 | 파일 | 설명 |
+|---|---|---|
+| `project` | 프로젝트(저장소) 루트의 `.mcp.json` | 실행 디렉터리 기준. 커밋하면 팀 공유 |
+| `local` | `~/.claude.json` (이 프로젝트 항목) | 사용자+현재 프로젝트 전용. `claude mcp add` 기본값 |
+| `user` | `~/.claude.json` (최상위 `mcpServers`) | 모든 프로젝트 — **비권장** |
+
+- `.mcp.json` 위치는 **설치 경로·`CLAUDE_CONFIG_DIR`와 무관**(실행 디렉터리 기준).
+- `local`/`user`의 `~/.claude.json`은 `CLAUDE_CONFIG_DIR` 설정 시 **`$CLAUDE_CONFIG_DIR/.claude.json`(= `/tmp`, 휘발)** 로 바뀝니다.
 
 ## 여러 모델 지정 (`modelPicker`)
 - `/model` 피커에 원하는 모델을 **개수 제한 없이** 이름 붙여 상주시킬 수 있음. settings.json 전용(env/CLI 등가 없음).
@@ -202,7 +210,7 @@ claude_install/claude-code/bin/claude.exe --version
 - 검증: 복사된 바이너리 단독 실행.
 
 ### 3) 런처 `claude_install/claude`
-> 아래는 요약이며, 전체 파일(헤더 주석 포함)은 **`bin/claude`**. 배포 시 `claude_install/claude`로 복사.
+> 아래는 요약이며, 전체 파일(헤더 주석 포함)은 **`bin/claude`**. 배포 시 **`bin/claude`→`claude_install/claude`**, **`bin/mcp.json`→`claude_install/mcp.json`** 로 복사.
 ```bash
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -237,6 +245,10 @@ cat > "$CLAUDE_CONFIG_DIR/settings.json" <<'JSON'
 }
 JSON
 
+# MCP 설정: 설치 디렉토리 소스를 매 실행 시 config 로 새로 복사 → --mcp-config 로 읽음(기존 설정과 병합)
+MCP_SRC="$HERE/mcp.json"; MCP_ARG=()
+[ -f "$MCP_SRC" ] && { install -m 600 "$MCP_SRC" "$CLAUDE_CONFIG_DIR/mcp.json"; MCP_ARG=(--mcp-config "$CLAUDE_CONFIG_DIR/mcp.json"); }
+
 # 외부 트래픽·업데이트 차단
 export DISABLE_UPDATES=1
 export DISABLE_AUTOUPDATER=1
@@ -267,6 +279,7 @@ exec "$HERE/claude-code/bin/claude.exe" \
   --permission-mode default \
   --allowedTools "Bash(git status *)" "Bash(git diff *)" \
   --disallowedTools "Bash(git push *)" "Bash(sudo *)" "Read(./.env)" \
+  "${MCP_ARG[@]}" \
   "$@"
 ```
 - 검증: `claude_install/claude --version`, 세션에서 `/status`(config 경로·모델), `/context`(스킬/룰 로드) 확인.
@@ -314,6 +327,7 @@ curl -sS http://10.29.248.6:4000/v1/messages \
 | 모델 ID 재매핑 | `settings.json`의 `modelOverrides` (Anthropic 모델 ID → 제공자 문자열) |
 | 커스텀 모델(피커) | `ANTHROPIC_CUSTOM_MODEL_OPTION` (+`_NAME`/`_DESCRIPTION`/`_SUPPORTED_CAPABILITIES`) |
 | 다중 모델(피커) | `settings.json`의 `modelPicker.options` — 환경변수 아님(래퍼가 생성) |
+| MCP 서버 | CLI `--mcp-config`(파일/문자열), `--strict-mcp-config`; 시작 타임아웃 `MCP_TIMEOUT`, `MCP_CONNECT_TIMEOUT_MS` |
 | 창/출력 한계 | `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS` |
 | 업데이트 차단 | `DISABLE_UPDATES`, `DISABLE_AUTOUPDATER` |
 | 외부 트래픽 차단 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL` |
@@ -347,4 +361,4 @@ curl -sS http://10.29.248.6:4000/v1/messages \
 - 배포 시: `ANTHROPIC_BASE_URL`·모델 태그를 환경에 맞게 확인, 리스크 2·4·5·6·7 검증.
 - 값 구분: **모델명은 실제 오픈소스 모델명 유지**, **서버 주소·포트·토큰·라우터 정보는 난수 placeholder**.
 - 모델 정렬: **무게순(거대 → 라이트)** `deepseek-coder-v2` > `qwen3-coder` > `mistral-nemo` > `llama3.1` > `gemma4` (피커·라우터 공통). 별칭 서열 fable > opus > sonnet > haiku.
-- MCP: **프로젝트(저장소) 루트의 `.mcp.json`(project 범위)** 사용 — `local`/`user` 범위는 `~/.claude.json`(=`CLAUDE_CONFIG_DIR` 설정 시 `/tmp`로 가 휘발)이라 부적합. 폐쇄망은 로컬 `stdio` 서버 우선.
+- MCP: **래퍼가 매 실행 시 `$CLAUDE_CONFIG_DIR/mcp.json` 생성**(소스=`claude_install/mcp.json`) 후 `--mcp-config`로 전달(기존 설정과 병합). 폐쇄망은 로컬 `stdio` 서버 우선.

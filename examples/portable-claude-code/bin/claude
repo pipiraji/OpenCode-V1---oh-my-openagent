@@ -18,6 +18,11 @@ set -Eeuo pipefail
 #   CLAUDE_ROUTER_TOKEN   라우터 키 = LiteLLM master_key (기본: sk-router-16a59d11fb4d7a21)
 #   CLAUDE_MODEL          기본 모델 = 라우터 model_name (기본: gemma4)
 #   CLAUDE_AGENTS_DIR     공유 스킬/룰 소스 (기본: $HOME/.agents)
+#   CLAUDE_MCP_SRC        MCP 설정 소스 (기본: $HERE/mcp.json = 설치 디렉토리)
+#
+# 배포물과 런타임(둘 다 매 실행 시 신규 생성, /tmp 휘발):
+#   $CONFIG_DIR/settings.json   모델 피커(modelPicker)
+#   $CONFIG_DIR/mcp.json        MCP 서버 = $CLAUDE_MCP_SRC 복사본 → --mcp-config 로 읽힘
 #
 # [Claude Code가 읽는 표준 변수]
 #   CLAUDE_CONFIG_DIR
@@ -69,10 +74,22 @@ cat > "$CONFIG_DIR/settings.json" <<'JSON'
 }
 JSON
 
+# MCP: 설치 디렉토리 소스를 런타임 config 로 매 실행 신규 복사 → --mcp-config 로 읽음
+#   (기존 MCP 설정과 병합; 래퍼 설정만 쓰려면 아래 exec 에 --strict-mcp-config 추가)
+MCP_SRC="${CLAUDE_MCP_SRC:-$HERE/mcp.json}"
+MCP_ARG=()
+if [[ -f "$MCP_SRC" ]]; then
+  install -m 600 "$MCP_SRC" "$CONFIG_DIR/mcp.json"
+  MCP_ARG=(--mcp-config "$CONFIG_DIR/mcp.json")
+fi
+
 # 외부 트래픽·업데이트 차단
 export DISABLE_UPDATES=1
 export DISABLE_AUTOUPDATER=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
+# 런타임 config 위치를 Claude Code 에 알림 (기본 ~/.claude 대신 /tmp)
+export CLAUDE_CONFIG_DIR="$CONFIG_DIR"
 
 # 내부 LLM: LiteLLM 라우터 1곳 (모델별 서버/토큰은 라우터가 처리)
 export ANTHROPIC_BASE_URL="$ROUTER_URL"
@@ -99,4 +116,5 @@ exec "$BINARY" \
   --permission-mode default \
   --allowedTools "Bash(git status *)" "Bash(git diff *)" \
   --disallowedTools "Bash(git push *)" "Bash(sudo *)" "Read(./.env)" \
+  "${MCP_ARG[@]}" \
   "$@"
