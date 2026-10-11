@@ -11,18 +11,26 @@ set -Eeuo pipefail
 # ⚠ 라우터 주소·토큰 등 접속 정보는 난수 placeholder 입니다. 회사(폐쇄망)에서 실제 값으로 교체하세요.
 #   모델명(model_name)과 별칭 매핑은 실제 오픈소스 모델명을 그대로 사용합니다.
 #
+# [홈 격리 — 실행 계정의 홈디렉토리를 절대 수정하지 않음]
+#   HOME 을 /tmp 샌드박스로 두고, 진짜 홈의 dotfile 은 '링크'만 한다(읽기).
+#   쓰기가 잦은 캐시/설정 dir(.cache/.config/.local/.claude/.npm)은 제외 → 홈 쓰기 0.
+#   HOME 자체가 /tmp 이므로 XDG_* 등 별도 리다이렉트 env 는 불필요.
+#
 # [Wrapper 전용 변수]
 #   COMPANY_CLAUDE_ROOT   설치 루트 (기본: 이 스크립트의 디렉터리)
 #   CLAUDE_CONFIG_DIR     런타임 config (기본: /tmp/claude_$USER/claude_config, 휘발)
+#   CLAUDE_SANDBOX_HOME   샌드박스 HOME (기본: /tmp/claude_$USER/home)
 #   CLAUDE_ROUTER_URL     LiteLLM 라우터 주소 (기본: http://10.29.248.6:4000)
 #   CLAUDE_ROUTER_TOKEN   라우터 키 = LiteLLM master_key (기본: sk-router-16a59d11fb4d7a21)
 #   CLAUDE_MODEL          기본 모델 = 라우터 model_name (기본: gemma4)
-#   CLAUDE_AGENTS_DIR     공유 스킬/룰 소스 (기본: $HOME/.agents)
+#   CLAUDE_AGENTS_DIR     공유 스킬/룰 소스 (기본: $REAL_HOME/.agents)
 #   CLAUDE_MCP_SRC        MCP 설정 소스 (기본: $HERE/mcp.json = 설치 디렉토리)
 #
 # 배포물과 런타임(둘 다 매 실행 시 신규 생성, /tmp 휘발):
+#   $HOME(샌드박스)             진짜 홈 dotfile 링크(.cache/.config/.local/.claude/.npm 제외)
 #   $CONFIG_DIR/settings.json   모델 피커(modelPicker)
 #   $CONFIG_DIR/mcp.json        MCP 서버 = $CLAUDE_MCP_SRC 복사본 → --mcp-config 로 읽힘
+#   $CONFIG_DIR/{skills,rules}  $AGENTS_DIR(공유) + $HERE/{skills,rules}(설치디렉토리) 링크
 #
 # [Claude Code가 읽는 표준 변수]
 #   CLAUDE_CONFIG_DIR
@@ -35,11 +43,19 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${COMPANY_CLAUDE_ROOT:-$HERE}"
 BINARY="$ROOT/claude-code/bin/claude.exe"
 
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/tmp/claude_$USER/claude_config}"
+USER="${USER:-$(id -un)}"
+RUNTIME="/tmp/claude_$USER"
+
+# 진짜 홈은 HOME 을 덮기 전에 확보 (HOME 을 /tmp 샌드박스로 바꾸므로)
+REAL_HOME="$(getent passwd "$USER" 2>/dev/null | cut -d: -f6 || true)"
+[[ -n "$REAL_HOME" ]] || REAL_HOME="$HOME"
+
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$RUNTIME/claude_config}"
+SANDBOX_HOME="${CLAUDE_SANDBOX_HOME:-$RUNTIME/home}"
 ROUTER_URL="${CLAUDE_ROUTER_URL:-http://10.29.248.6:4000}"
 ROUTER_TOKEN="${CLAUDE_ROUTER_TOKEN:-sk-router-16a59d11fb4d7a21}"
 MODEL="${CLAUDE_MODEL:-gemma4}"
-AGENTS_DIR="${CLAUDE_AGENTS_DIR:-$HOME/.agents}"
+AGENTS_DIR="${CLAUDE_AGENTS_DIR:-$REAL_HOME/.agents}"
 
 if [[ ! -x "$BINARY" ]]; then
   echo "Claude Code 실행파일을 찾지 못했거나 실행할 수 없습니다: $BINARY" >&2
@@ -47,15 +63,37 @@ if [[ ! -x "$BINARY" ]]; then
   exit 69
 fi
 
+# --- 홈 격리: HOME 을 /tmp 샌드박스로, 진짜 홈 dotfile 은 '링크'만 (홈 쓰기 0) ---
+if [[ "$SANDBOX_HOME" == "$REAL_HOME" || "$SANDBOX_HOME" == "/" ]]; then
+  echo "샌드박스 HOME 설정이 위험합니다(진짜 홈과 동일/루트): $SANDBOX_HOME" >&2
+  exit 70
+fi
+install -d -m 700 "$RUNTIME"
+rm -rf "$SANDBOX_HOME"
+install -d -m 700 "$SANDBOX_HOME"
+shopt -s dotglob nullglob
+for src in "$REAL_HOME"/.*; do
+  name="${src##*/}"
+  case "$name" in .|..|.cache|.config|.local|.claude|.npm) continue;; esac  # 쓰기 잦은 캐시/설정 dir 제외
+  [[ -e "$src" ]] || continue
+  ln -sfn "$src" "$SANDBOX_HOME/$name"
+done
+shopt -u dotglob nullglob
+export HOME="$SANDBOX_HOME"
+
 install -d -m 700 "$CONFIG_DIR"
 
-# 공유 스킬/룰 링크 (OpenCode와 동일 소스: $AGENTS_DIR) — 읽기용
+# 공유 스킬/룰: $AGENTS_DIR(공유) + $HERE/{skills,rules}(설치 디렉토리, 예: graphify) 병합 링크
 for d in skills rules; do
-  src="$AGENTS_DIR/$d"
-  [[ -d "$src" ]] || continue
   dst="$CONFIG_DIR/$d"
-  [[ -L "$dst" || ! -e "$dst" ]] || rm -rf "$dst"   # 기존 실제 디렉토리면 교체(안 하면 그 안에 링크 생성)
-  ln -sfn "$src" "$dst"
+  rm -rf "$dst"; install -d -m 700 "$dst"
+  for root in "$AGENTS_DIR/$d" "$HERE/$d"; do
+    [[ -d "$root" ]] || continue
+    for src in "$root"/*; do
+      [[ -e "$src" ]] || continue
+      ln -sfn "$src" "$dst/${src##*/}"
+    done
+  done
 done
 
 # 모델 피커(settings.json 전용) — 배포물이 아니라 매 실행 시 생성, 라우터 model_name 과 일치

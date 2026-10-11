@@ -1,8 +1,9 @@
 # 포터블 Claude Code (폐쇄망 · 내부 LLM 전용)
 
 작성일: 2026-10-10
-상태: **확정(final)** — 내부 LLM(Ollama) + **LiteLLM 라우터(A안)** / `/opt` 공유 경로 / `/tmp` 휘발 / 공유 스킬·룰은 `~/.agents` 링크
-예제 파일: `bin/claude`(런처), `bin/mcp.json`(MCP 설정 소스), `litellm/config.yaml`(라우터)
+갱신일: 2026-10-11
+상태: **확정(final)** — 내부 LLM(Ollama) + **LiteLLM 라우터(A안)** / `/opt` 공유 경로 / `/tmp` 휘발 / **HOME 샌드박스(홈 쓰기 0)** / 공유 스킬·룰 `$REAL_HOME/.agents` 링크 / **graphify 포터블**
+예제 파일: `bin/claude`(런처), `bin/mcp.json`(MCP 설정 소스), `litellm/config.yaml`(라우터). graphify는 패키지(`graphifyy`)를 `/opt`에 벤더링하고 스킬은 설치 디렉토리에서 관리.
 참고 문서: `doc/` (Claude Code 공식 문서 한글판 — `모델 구성.md`, `환경변수.md` 등)
 
 > ⚠ **서버 주소·포트·토큰은 난수 placeholder** 입니다(폐쇄망 실제 값으로 교체). **모델명은 실제 오픈소스 모델명 그대로** 둡니다(거대 → 라이트 순): `deepseek-coder-v2`, `qwen3-coder`, `mistral-nemo`, `llama3.1`, `gemma4`.
@@ -11,10 +12,12 @@
 - 폐쇄망 공용/프로젝트 계정에서 Claude Code를 **내부 LLM에만** 연결해 배포·실행.
 - 외부망·claude.ai 구독/API 키 불필요.
 - 타 사용자 홈·개인 설정을 **건드리지 않고**, `/tmp`에서 격리 실행.
+- **실행 계정의 홈디렉토리를 절대 수정하지 않음**(최상위 원칙) → `HOME`을 `/tmp` 샌드박스로 두고 진짜 홈 dotfile은 **링크(읽기)만** 건다.
 - 파일을 여러 개 만들지 않음 → **래퍼(wrapper) 1개**로 완결. 배포물은 래퍼뿐이고, `settings.json`은 **래퍼가 실행 시 생성**(다중 모델 피커용).
 
 ## 핵심 결정
 - 설정/세션/자격증명/플러그인은 `CLAUDE_CONFIG_DIR` 하나로 이동 (OpenCode의 XDG 다중 변수보다 단순).
+- **홈 쓰기 0**: `HOME`을 `/tmp/claude_$USER/home` 샌드박스로 두고, 진짜 홈의 dotfile은 **심볼릭 링크(읽기)**. 쓰기 잦은 캐시/설정 dir(`.cache`/`.config`/`.local`/`.claude`/`.npm`)은 링크 제외 → 그대로 샌드박스에 생성. HOME 자체가 `/tmp`이므로 **`XDG_*` 등 별도 리다이렉트 env 불필요**.
 - model·provider·업데이트 차단·네트워크는 **전부 환경변수**로.
 - permissions는 settings.json 대신 **CLI 플래그**(`--allowedTools`/`--disallowedTools`/`--permission-mode`).
 - `settings.json`·`mcp.json`은 배포하지 않고 **래퍼가 매 실행 시 `/tmp`에 생성** — 모델 피커(`modelPicker`)와 MCP(소스 `claude_install/mcp.json` → `--mcp-config`).
@@ -23,7 +26,8 @@
 - **프로토콜: Ollama** (Anthropic `/v1/messages` 네이티브). 모델별 서버/토큰이 달라 **앞단에 LiteLLM 라우터 1개**를 둠(A안, "여러 서버 라우팅"). 단일 서버만 쓰면 라우터 없이 바로 Ollama에 연결 가능.
 - **배포 위치: `/opt/company-claude/claude_install`** (홈 밖 공유 경로), 사용자 PATH로 연결.
 - **데이터: `/tmp` 휘발** — 세션·기록 미보존, 로그인은 `ANTHROPIC_AUTH_TOKEN`으로 처리.
-- **공유 스킬/룰**: `CLAUDE_CONFIG_DIR`는 `/tmp`로 두고, `$HOME/.agents/{skills,rules}`만 **링크로 공유** (OpenCode와 동일 소스) → 홈 오염·쿼터 0.
+- **공유 스킬/룰**: `CLAUDE_CONFIG_DIR`는 `/tmp`로 두고, `$REAL_HOME/.agents/{skills,rules}`(HOME 샌드박스라 `$HOME`이 아님)와 설치 디렉토리 `$HERE/{skills,rules}`를 **링크로 병합** (OpenCode 호환, 홈 오염·쿼터 0).
+- **graphify(선택)**: 오픈소스 지식 그래프 스킬. 패키지를 `/opt/company-claude/graphify/venv`에 벤더링하고 스킬만 설치 디렉토리→config 로 링크.
 
 ## 자원 값
 | 항목 | 값 |
@@ -37,6 +41,7 @@
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `gemma4` (가장 라이트) |
 | `CLAUDE_CODE_SUBAGENT_MODEL` | `gemma4` |
 | `CLAUDE_CONFIG_DIR` | `/tmp/claude_$USER/claude_config` |
+| `HOME` (샌드박스) | `/tmp/claude_$USER/home` (진짜 홈은 `$REAL_HOME`로 별도 보존) |
 
 > ★ 배포 시 확인: **`ANTHROPIC_BASE_URL`**(라우터 주소)·**`ANTHROPIC_AUTH_TOKEN`**(라우터 키, `litellm/config.yaml`의 `master_key`와 동일)와 **모델 태그**. 모델별 실제 Ollama 서버/토큰은 **`litellm/config.yaml`**에서 관리한다(VRAM 2GB면 `gemma4:e2b`/`e4b` 권장).
 > 단일 서버만 쓴다면 라우터 없이 `ANTHROPIC_BASE_URL`을 Ollama 주소(`http://localhost:11434`)로 두고 토큰은 더미로 두면 된다.
@@ -47,26 +52,42 @@
 ├── claude_install/                    # Claude Code — 통째로 이동 가능, 공유 read-only 가능
 │   ├── claude                          # 런처(wrapper) — PATH에 이 디렉토리를 추가
 │   ├── mcp.json                        # MCP 설정 소스 (= 이 저장소의 bin/mcp.json) → 매 실행 config 로 복사
+│   ├── skills/ rules/                  # (선택) 설치-디렉토리 스킬/룰 (예: graphify) → config 로 링크
 │   └── claude-code/
 │       └── bin/claude.exe              # 네이티브 바이너리(자체 완결, 이 내부 경로는 패키지 고정)
+├── graphify/                           # graphify (지식 그래프 스킬) — 선택
+│   ├── venv/                           #   graphifyy + deps (폐쇄망 pip 휠 vendoring)
+│   └── skills/graphify/SKILL.md        #   스킬 소스 → config 로 링크
 └── litellm/
     ├── venv/                           # LiteLLM (폐쇄망: pip 휠 vendoring)
     └── config.yaml                     # ★ 모델별 URL/토큰 단일 소스 (= 이 저장소의 litellm/config.yaml)
 
-/tmp/claude_<계정>/claude_config/      # = CLAUDE_CONFIG_DIR (런타임, 휘발) — 매 실행 신규 생성
-├── settings.json                       # 래퍼가 매 실행 생성 (modelPicker)
-├── mcp.json                            # 래퍼가 매 실행 생성 (MCP, --mcp-config 로 읽힘)
-├── skills -> $HOME/.agents/skills     # 공유(링크, 읽기용) — OpenCode와 동일 소스
-├── rules  -> $HOME/.agents/rules      # 공유(링크, 읽기용)
-├── plugins/                          # (선택) 또는 CLAUDE_CODE_PLUGIN_DIRS 사용
-└── sessions/ projects/ backups/ …    # Claude Code가 자동 생성 (쓰기 필요)
+/tmp/claude_<계정>/
+├── home/                               # = HOME 샌드박스 (매 실행 재생성) — 진짜 홈 dotfile 링크(.cache/.config/.local/.claude/.npm 제외)
+└── claude_config/                      # = CLAUDE_CONFIG_DIR (런타임, 휘발) — 매 실행 신규 생성
+    ├── settings.json                   # 래퍼가 매 실행 생성 (modelPicker)
+    ├── mcp.json                        # 래퍼가 매 실행 생성 (MCP, --mcp-config 로 읽힘)
+    ├── skills/* rules/*                # $REAL_HOME/.agents + $HERE(설치디렉토리) 링크 (읽기용)
+    ├── plugins/                        # (선택) 또는 CLAUDE_CODE_PLUGIN_DIRS 사용
+    └── sessions/ projects/ backups/ …  # Claude Code가 자동 생성 (쓰기 필요)
 ```
 
+## 홈 격리 — HOME 샌드박스 (홈 쓰기 0)
+**최상위 원칙: 실행 계정의 홈디렉토리를 절대 수정하지 않는다.**
+- `HOME`을 `/tmp/claude_$USER/home`으로 덮고, 진짜 홈(`$REAL_HOME`, HOME 덮기 전에 `getent passwd`로 확보)의 dotfile은 **심볼릭 링크(읽기)만** 한다.
+- 쓰기가 잦은 캐시/설정 dir(`.cache`/`.config`/`.local`/`.claude`/`.npm`)은 **링크 제외** → 필요하면 샌드박스 안에 새로 생성됨.
+- `HOME` 자체가 `/tmp`이므로 `~/.cache`·`~/.config`·`~/.local/share`가 자동으로 샌드박스를 향함 → **`XDG_*` 등 별도 리다이렉트 env 불필요**(링크하지 않은 dir는 샌드박스에 생성).
+- `.gnupg`/`.ssh`는 **폐쇄망에서 허용되지 않으므로** 링크해도 실사용/쓰기 없음(존재 시 링크 대상에 포함).
+- 링크 정책 요약: **"링크하지 않은 것은 env 불필요, 링크한 것만 env로 격리"**. 만약 재사용을 위해 `~/.config` 등을 링크한다면 그때만 `XDG_CONFIG_HOME`을 함께 지정해 링크로의 쓰기를 차단.
+- 검증(선택): 세션 후 `find "$REAL_HOME" -xdev -newer <marker> -not -path '*/.cache/*'` 로 실제 변경 0 확인.
+
 ## 공유 스킬/룰 (OpenCode 호환) — 왜 config=temp + 링크인가
-- Claude Code는 사용자 스킬/룰을 `~/.claude/skills`·`~/.claude/rules`에서 읽고, `CLAUDE_CONFIG_DIR`이 `~/.claude`를 대체하므로 **실제 위치는 `$CLAUDE_CONFIG_DIR/skills`·`$CLAUDE_CONFIG_DIR/rules`**.
+- Claude Code는 사용자 스킬/룰을 `~/.claude/skills`·`~/.claude/rules`에서 읽고, `CLAUDE_CONFIG_DIR`이 `~/.claude`를 대체하므로 **실제 위치는 `$CLAUDE_CONFIG_DIR/{skills,rules}`**.
 - OpenCode도 `$HOME/.agents/skills/*/SKILL.md`를 읽음 → **같은 소스를 공유** 가능.
 - config 자체를 `~/.agents`로 두면 런타임 파일(`settings.json`·`plugins/`·`sessions/`·`history.jsonl` 등)이 공유 디렉토리를 오염시키고, `agents/`·`commands/` 포맷 충돌·홈 쿼터 위험이 있음.
-- 따라서 **config는 `/tmp`, `$HOME/.agents/{skills,rules}`만 링크**로 끌어와 공유(방향: temp → home).
+- 따라서 **config는 `/tmp`, 스킬/룰 소스만 링크**로 끌어와 공유(방향: temp → home). 소스는 두 곳을 **병합**:
+  1. `$REAL_HOME/.agents/{skills,rules}` — 사용자 공유(OpenCode와 동일). ※ HOME이 샌드박스이므로 `$HOME`이 아니라 **`$REAL_HOME`**.
+  2. `$HERE/{skills,rules}` — 설치 디렉토리 스킬(예: graphify).
 - 링크는 읽기용. Claude Code가 스킬을 쓰는 기능(플러그인/스킬 관리)을 쓰지 않으면 소스는 그대로 유지됨.
 
 ## MCP 서버 설정 (외부 도구 연결)
@@ -187,6 +208,21 @@ export CLAUDE_CONFIG_DIR="/tmp/claude_$USER/gemma4"
 - **느린 로컬 모델 타임아웃**을 래퍼에서 확대(`API_TIMEOUT_MS`·`API_FORCE_IDLE_TIMEOUT=0`·`CLAUDE_STREAM_IDLE_TIMEOUT_MS`) + 라우터 `timeout` → 생성 중 끊김 방지.
 - 게이트웨이 자동 발견(`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`)은 **끔** — 모델명 필터로 `gemma4` 등이 제외되므로 `modelPicker`로 대체.
 
+## graphify (지식 그래프 스킬) — 포터블 배포
+오픈소스 **graphify**(MIT)는 프로젝트를 읽어 **지식 그래프**로 바꾸는 Claude Code/OpenCode 스킬입니다(`/graphify`). 2조각으로 구성:
+
+| 조각 | 정체 | 배치 |
+|---|---|---|
+| Python 패키지 | `graphifyy`(+CLI `graphify`) | `/opt/company-claude/graphify/venv` (폐쇄망 pip 벤더링) |
+| 스킬 파일 | `SKILL.md` (에이전트 지시문) | 설치 디렉토리 소스 → 래퍼가 config 로 링크 |
+
+- **동작**: 코드는 tree-sitter AST(LLM 불필요), 문서/이미지는 **에이전트의 모델**로 semantic 추출. 별도 Anthropic API 키가 아니라 **Claude Code가 쓰는 모델(내부 Ollama 라우터)** 로 동작.
+- **모델 제약**: 이미지/스크린샷은 **vision 필요** → 현재 라우터(`deepseek-coder-v2`/`qwen3-coder`/`gemma4`)는 비전 미지원이라 **코드·문서만** 실질 사용. semantic 추출은 **서브에이전트 모델(`gemma4`)** 로 병렬 실행됨.
+- **출력**: `graphify-out/`(**프로젝트 cwd**)에 생성(영속 목적). 홈 샌드박스여도 **홈 위치에서 실행하면 홈(샌드박스)** 에 생기므로 **항상 프로젝트 디렉토리에서 실행**.
+- **폐쇄망 불가**: `graphify add <URL>`(논문/트윗 fetch) 등 외부망 의존 기능. 로컬 `/graphify`, `--watch`, `hook install`은 가능.
+- **금지**: `graphify install`(= `~/.claude`에 씀), `graphify claude install`(프로젝트 `CLAUDE.md`를 씀 → 원치 않으면 회피). 수동 배치만 사용.
+- **트리거/정책 효율**(양쪽 공통): 무거운 본문은 **skills**(온디맨드), 상시 필요한 "그래프 우선" 정책 한 줄만 rules/instructions. OpenCode 슬래시 트리거는 v0.7.16+ 필요.
+
 ## 설치 절차 + 검증
 
 ### 1) 글로벌 설치 (관리자 계정, 내부 npm 미러)
@@ -210,23 +246,36 @@ claude_install/claude-code/bin/claude.exe --version
 - 검증: 복사된 바이너리 단독 실행.
 
 ### 3) 런처 `claude_install/claude`
-> 아래는 요약이며, 전체 파일(헤더 주석 포함)은 **`bin/claude`**. 배포 시 **`bin/claude`→`claude_install/claude`**, **`bin/mcp.json`→`claude_install/mcp.json`** 로 복사.
+> 아래는 요약이며, 전체 파일(헤더 주석 포함)은 **`bin/claude`**. 배포 시 **`bin/claude`→`claude_install/claude`**, **`bin/mcp.json`→`claude_install/mcp.json`** 로 복사(설치-디렉토리 스킬을 쓸 경우 `bin/skills`→`claude_install/skills`).
 ```bash
 #!/usr/bin/env bash
 set -Eeuo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # = claude_install
 
-# 포터블 격리 (홈 대신 temp)
-export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/tmp/claude_$USER/claude_config}"
+USER="${USER:-$(id -un)}"; RUNTIME="/tmp/claude_$USER"
+REAL_HOME="$(getent passwd "$USER" | cut -d: -f6)"       # HOME 덮기 전에 진짜 홈 확보
+export HOME="${CLAUDE_SANDBOX_HOME:-$RUNTIME/home}"      # ★ 홈 샌드박스
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$RUNTIME/claude_config}"
+
+# 홈 쓰기 0: 진짜 홈 dotfile 은 '링크'만 (쓰기 잦은 캐시/설정 dir 제외)
+rm -rf "$HOME"; install -d -m 700 "$HOME"
+shopt -s dotglob nullglob
+for src in "$REAL_HOME"/.*; do
+  name="${src##*/}"
+  case "$name" in .|..|.cache|.config|.local|.claude|.npm) continue;; esac
+  [ -e "$src" ] && ln -sfn "$src" "$HOME/$name"
+done
+shopt -u dotglob nullglob
+
 install -d -m 700 "$CLAUDE_CONFIG_DIR"
 
-# 공유 스킬/룰 링크 (OpenCode와 동일 소스: $HOME/.agents) — 소스 있을 때만, 읽기용
+# 공유 스킬/룰: $REAL_HOME/.agents(공유) + $HERE/{skills,rules}(설치디렉토리) 병합 링크
 for d in skills rules; do
-  src="$HOME/.agents/$d"
-  [ -d "$src" ] || continue
-  dst="$CLAUDE_CONFIG_DIR/$d"
-  [ -L "$dst" ] || [ ! -e "$dst" ] || rm -rf "$dst"   # 기존 실제 디렉토리면 교체(안 하면 그 안에 링크 생성)
-  ln -sfn "$src" "$dst"
+  dst="$CLAUDE_CONFIG_DIR/$d"; rm -rf "$dst"; install -d -m 700 "$dst"
+  for root in "$REAL_HOME/.agents/$d" "$HERE/$d"; do
+    [ -d "$root" ] || continue
+    for src in "$root"/*; do [ -e "$src" ] && ln -sfn "$src" "$dst/${src##*/}"; done
+  done
 done
 
 # 모델 피커(settings.json 전용) — 배포물이 아니라 매 실행 시 생성. 라우터 model_name 과 일치
@@ -282,7 +331,7 @@ exec "$HERE/claude-code/bin/claude.exe" \
   "${MCP_ARG[@]}" \
   "$@"
 ```
-- 검증: `claude_install/claude --version`, 세션에서 `/status`(config 경로·모델), `/context`(스킬/룰 로드) 확인.
+- 검증: `claude_install/claude --version`, 세션에서 `/status`(HOME·config 경로·모델), `/context`(스킬/룰 로드) 확인.
 
 ### 4) 사용자 PATH 연결 (관리자)
 ```bash
@@ -305,9 +354,34 @@ install -D -m 600 litellm/config.yaml /opt/company-claude/litellm/config.yaml
 ```
 - 모델 추가/변경은 `config.yaml`의 `model_list`만 수정 → 라우터 재시작.
 - 상시 구동은 systemd 등록 권장: `ExecStart=/opt/company-claude/litellm/venv/bin/litellm --config /opt/company-claude/litellm/config.yaml --port 4000`.
-- 검증: 아래 6)의 `curl`.
+- 검증: 아래 7)의 `curl`.
 
-### 6) 연결 검증
+### 6) graphify (선택 — 지식 그래프 스킬)
+상세·근거는 위 "graphify (지식 그래프 스킬)" 절 참조.
+
+**(a) 패키지 벤더링** — 전용 Python(3.11 등)에서 venv 생성(시스템 파이썬 오염 금지):
+```bash
+python3 -m venv /opt/company-claude/graphify/venv
+/opt/company-claude/graphify/venv/bin/pip install \
+  -i http://<내부 pypi>/simple --trusted-host <내부 pypi> graphifyy      # 필요시 [pdf,watch]
+chmod -R a+rX /opt/company-claude/graphify
+```
+**(b) 스킬 소스 배치** — 설치 디렉토리에 두면 래퍼가 `$CLAUDE_CONFIG_DIR/skills`로 링크:
+```bash
+SKILL=$(/opt/company-claude/graphify/venv/bin/python3 -c \
+  "import graphify,pathlib;print(pathlib.Path(graphify.__file__).parent/'skill.md')")
+install -D -m 644 "$SKILL" /opt/company-claude/claude_install/skills/graphify/SKILL.md
+# 폐쇄망 하드닝: SKILL.md 의 Step 1 자동 pip 설치 줄 제거(외부망 시도 차단)
+```
+**(c) 실행 경로** — 스킬이 `python3 -c "import graphify"`를 호출하므로 해당 `python3`가 import 가능해야 함:
+```bash
+# /etc/profile.d/claude.sh  (venv/bin 을 PATH 앞에 — 전용 파이썬이면 안전)
+export PATH="/opt/company-claude/graphify/venv/bin:$PATH"
+```
+> 전용 3.11이 아니라 공용/배포판 파이썬을 가리고 싶지 않다면: `venv/bin`을 PATH에 넣지 말고, 배포용 `SKILL.md`의 `python3`를 `venv/bin/python3` 절대경로로 치환.
+- 검증: `python3 -c "import graphify"`, `graphify --help`, 프로젝트에서 `claude` 실행 후 `/graphify .`.
+
+### 7) 연결 검증
 ```bash
 # 라우터(Anthropic /v1/messages)로 모델 라우팅까지 확인
 curl -sS http://10.29.248.6:4000/v1/messages \
@@ -320,6 +394,7 @@ curl -sS http://10.29.248.6:4000/v1/messages \
 | 목적 | 변수 |
 |---|---|
 | 설정 트리 위치 | `CLAUDE_CONFIG_DIR` |
+| 샌드박스 HOME | `HOME` (진짜 홈은 `$REAL_HOME`로 별도 보존, `CLAUDE_SANDBOX_HOME`으로 덮기 가능) |
 | 엔드포인트/토큰 | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` |
 | 모델(기본) | `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_MODEL` |
 | 모델 별칭 매핑 | `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` (구 `ANTHROPIC_SMALL_FAST_MODEL` deprecated) |
@@ -350,15 +425,19 @@ curl -sS http://10.29.248.6:4000/v1/messages \
 5. **홈 `~/.claude/CLAUDE.md` 누출** — `CLAUDE_CONFIG_DIR` 설정에도 홈 지침이 로드될 수 있음. 문제 시 래퍼에 `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` 추가.
 6. **`~/.claude.json` 위치** — 포터블 핵심. `CLAUDE_CONFIG_DIR` 하위로 따라오는지 실측 확인 필요.
 7. **npm 미러에 플랫폼 패키지 존재** — `@anthropic-ai/claude-code-linux-x64@<버전>` 없으면 반입 요청.
+8. **홈 쓰기 0 검증** — 링크 정책이므로, 세션 후 `find "$REAL_HOME" -xdev -newer <marker>` 로 실제 변경 0 확인 권장. 비XDG 하드코딩 경로(`~/.git-credentials`, `~/.wget-hsts` 등)는 실사용이 없으면 무시.
+9. **graphify** — 이미지/PDF는 **비전 모델** 필요(현 라우터 미지원 → 코드·문서만), semantic 추출은 **서브에이전트 모델(`gemma4`)** 사용, `graphify-out/`는 **cwd**(홈에서 실행 금지).
 
 ## 확정 사항
 - 프로토콜: **Ollama** (Anthropic `/v1/messages` 네이티브).
 - 다중 서버(모델별 URL/토큰): **라우터(LiteLLM) 1개를 앞단에 두는 A안 채택** (B안=래퍼 분리는 대안).
 - 배포 위치: **`/opt/company-claude/claude_install`** (홈 밖 공유 경로).
 - 데이터 영속성: **`/tmp` 휘발** (세션·기록 미보존).
-- 공유 스킬/룰: **`$CLAUDE_CONFIG_DIR/skills`·`$CLAUDE_CONFIG_DIR/rules`**(=`/tmp/claude_$USER/claude_config` 밑)를 `$HOME/.agents/{skills,rules}`로 **링크** (OpenCode 호환, 홈 오염 없음).
+- 홈 격리: **`HOME` 샌드박스(`/tmp/claude_$USER/home`)** + 진짜 홈 dotfile **링크(읽기)**, 쓰기 잦은 dir(`.cache`/`.config`/`.local`/`.claude`/`.npm`) 제외 → **홈 쓰기 0**(최상위 원칙). `XDG_*` 등 별도 리다이렉트 불필요.
+- 공유 스킬/룰: **`$REAL_HOME/.agents/{skills,rules}`**(HOME 샌드박스라 `$HOME` 아님)와 설치 디렉토리 `$HERE/{skills,rules}`를 **병합 링크** (OpenCode 호환, 홈 오염 없음).
+- graphify: **`/opt/company-claude/graphify/venv`(전용 Python) 벤더링**, 스킬은 설치 디렉토리 소스 → config 링크. **`graphify install` 금지**.
 - 다중 모델: **`modelPicker`를 래퍼가 매 실행 시 `settings.json`으로 생성** (env 상한 ~5개 회피, 개수 무제한).
-- 배포 시: `ANTHROPIC_BASE_URL`·모델 태그를 환경에 맞게 확인, 리스크 2·4·5·6·7 검증.
+- 배포 시: `ANTHROPIC_BASE_URL`·모델 태그를 환경에 맞게 확인, 리스크 2·4·5·6·7·8 검증.
 - 값 구분: **모델명은 실제 오픈소스 모델명 유지**, **서버 주소·포트·토큰·라우터 정보는 난수 placeholder**.
 - 모델 정렬: **무게순(거대 → 라이트)** `deepseek-coder-v2` > `qwen3-coder` > `mistral-nemo` > `llama3.1` > `gemma4` (피커·라우터 공통). 별칭 서열 fable > opus > sonnet > haiku.
 - MCP: **래퍼가 매 실행 시 `$CLAUDE_CONFIG_DIR/mcp.json` 생성**(소스=`claude_install/mcp.json`) 후 `--mcp-config`로 전달(기존 설정과 병합). 폐쇄망은 로컬 `stdio` 서버 우선.
