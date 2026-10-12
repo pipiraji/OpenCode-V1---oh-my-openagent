@@ -1,8 +1,8 @@
 # 포터블 Claude Code (폐쇄망 · 내부 LLM 전용)
 
 작성일: 2026-10-10
-갱신일: 2026-10-11
-상태: **확정(final)** — 내부 LLM(Ollama) + **LiteLLM 라우터(A안)** / `/opt` 공유 경로 / `/tmp` 휘발 / **HOME 샌드박스(홈 쓰기 0)** / 공유 스킬·룰 `$REAL_HOME/.agents` 링크 / **graphify 포터블**
+갱신일: 2026-10-12
+상태: **확정(final)** — 내부 LLM(Ollama) + **LiteLLM 라우터(A안)** / `/opt` 공유 경로 / `/tmp` 휘발 / **HOME 샌드박스(홈 쓰기 0)** / 공유 스킬·룰 `$REAL_HOME/.agents` 링크 / **graphify 포터블** / **폐쇄망 오프라인 차단 변수 전면 선언**
 예제 파일: `bin/claude`(런처), `bin/mcp.json`(MCP 설정 소스), `litellm/config.yaml`(라우터). graphify는 패키지(`graphifyy`)를 `/opt`에 벤더링하고 스킬은 설치 디렉토리에서 관리.
 참고 문서: `doc/` (Claude Code 공식 문서 한글판 — `모델 구성.md`, `환경변수.md` 등)
 
@@ -19,6 +19,7 @@
 - 설정/세션/자격증명/플러그인은 `CLAUDE_CONFIG_DIR` 하나로 이동 (OpenCode의 XDG 다중 변수보다 단순).
 - **홈 쓰기 0**: `HOME`을 `/tmp/claude_$USER/home` 샌드박스로 두고, 진짜 홈의 dotfile은 **심볼릭 링크(읽기)**. 쓰기 잦은 캐시/설정 dir(`.cache`/`.config`/`.local`/`.claude`/`.npm`)은 링크 제외 → 그대로 샌드박스에 생성. HOME 자체가 `/tmp`이므로 **`XDG_*` 등 별도 리다이렉트 env 불필요**.
 - model·provider·업데이트 차단·네트워크는 **전부 환경변수**로.
+- **폐쇄망(외부 인터넷 없음)**: 비필수 트래픽·업데이트·텔레메트리·기능 플래그·웹 도구·마켓플레이스·claude.ai 연결을 **래퍼가 환경변수로 전면 차단**(개별 변수까지 명시 선언). `WebSearch`만 전용 env가 없어 CLI `--disallowedTools`로 차단.
 - permissions는 settings.json 대신 **CLI 플래그**(`--allowedTools`/`--disallowedTools`/`--permission-mode`).
 - `settings.json`·`mcp.json`은 배포하지 않고 **래퍼가 매 실행 시 `/tmp`에 생성** — 모델 피커(`modelPicker`)와 MCP(소스 `claude_install/mcp.json` → `--mcp-config`).
 - 설치: npm(내부 미러) 글로벌 설치 → 프로젝트 `claude_install/`로 `cp -a` vendoring.
@@ -298,10 +299,37 @@ JSON
 MCP_SRC="$HERE/mcp.json"; MCP_ARG=()
 [ -f "$MCP_SRC" ] && { install -m 600 "$MCP_SRC" "$CLAUDE_CONFIG_DIR/mcp.json"; MCP_ARG=(--mcp-config "$CLAUDE_CONFIG_DIR/mcp.json"); }
 
-# 외부 트래픽·업데이트 차단
+# ============================================================================
+# 폐쇄망(외부 인터넷 불가) 차단 — 비필수 트래픽·업데이트·텔레메트리·웹 접근
+# ============================================================================
+# (1) 총괄: 자동업데이트·텔레메트리·오류보고·/feedback·릴리스노트·PR배지·
+#     빠른모드 확인·기능 플래그(GrowthBook) 가져오기까지 한 번에 차단.
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+# (2) 텔레메트리/추적/오류보고
+export DISABLE_TELEMETRY=1
+export DO_NOT_TRACK=1
+export DISABLE_ERROR_REPORTING=1
+export DISABLE_GROWTHBOOK=1
+# (3) 업데이트 (폐쇄망은 새 버전을 받을 수 없음)
 export DISABLE_UPDATES=1
 export DISABLE_AUTOUPDATER=1
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export DISABLE_UPGRADE_COMMAND=1
+# (4) 피드백/설문
+export DISABLE_FEEDBACK_COMMAND=1
+export CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1
+export CLAUDE_CODE_SEND_FEEDBACK=0
+# (5) 플러그인/마켓플레이스 (원격 git clone·등록)
+export CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1
+export CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE=1
+export DISABLE_INSTALL_GITHUB_APP_COMMAND=1
+# (6) claude.ai 연결 (커넥터·아티팩트)
+export ENABLE_CLAUDEAI_MCP_SERVERS=false
+export CLAUDE_CODE_DISABLE_ARTIFACT=1
+# (7) 웹 도구 (WebSearch 는 env 가 없어 exec 의 --disallowedTools 로)
+export CLAUDE_CODE_DISABLE_WEB_FETCH=1
+# (8) IDE 연동 (확장 자동 설치/자동 연결)
+export CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1
+export CLAUDE_CODE_AUTO_CONNECT_IDE=false
 
 # 내부 LLM: LiteLLM 라우터 1곳 (모델별 서버/토큰은 litellm/config.yaml 이 처리)
 export ANTHROPIC_BASE_URL="http://10.29.248.6:4000"
@@ -324,10 +352,11 @@ export CLAUDE_STREAM_IDLE_TIMEOUT_MS=600000            # 스트림 정체 타임
 # export CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072
 
 # permissions (settings.json 대신 CLI 플래그)
+#   WebSearch 는 전용 env 가 없어 여기서 차단(WebFetch 는 CLAUDE_CODE_DISABLE_WEB_FETCH 로 차단)
 exec "$HERE/claude-code/bin/claude.exe" \
   --permission-mode default \
   --allowedTools "Bash(git status *)" "Bash(git diff *)" \
-  --disallowedTools "Bash(git push *)" "Bash(sudo *)" "Read(./.env)" \
+  --disallowedTools "Bash(git push *)" "Bash(sudo *)" "Read(./.env)" "WebFetch" "WebSearch" \
   "${MCP_ARG[@]}" \
   "$@"
 ```
@@ -390,6 +419,40 @@ curl -sS http://10.29.248.6:4000/v1/messages \
   -d '{"model":"gemma4","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
+## 폐쇄망 오프라인 환경변수 (외부 인터넷 불가)
+외부 인터넷이 없으면 Claude Code가 시도하는 네트워크 동작(업데이트·텔레메트리·기능 플래그·웹 도구·마켓플레이스·claude.ai 연결)을 **래퍼가 전부 차단**합니다. 대부분 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 하나로 포괄되지만, 의도·영향을 남기기 위해 개별 변수도 함께 선언합니다(래퍼 반영됨).
+
+| 그룹 | 변수 | 차단/비활성 대상 |
+|---|---|---|
+| 총괄 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | 자동업데이트·텔레메트리·오류보고·`/feedback`·릴리스노트·PR/MR 배지·빠른모드 확인·기능 플래그 fetch. **`0`/`false`여도 차단 유지**(해제는 unset) |
+| 텔레메트리 | `DISABLE_TELEMETRY=1` | Statsig·OTel 텔레메트리 (**`0`이어도 거부**) |
+| | `DO_NOT_TRACK=1` | 공통 규약(=`DISABLE_TELEMETRY`와 동일 효과) |
+| | `DISABLE_ERROR_REPORTING=1` | 오류 보고(Sentry) (**`0`이어도 거부**) |
+| | `DISABLE_GROWTHBOOK=1` | GrowthBook 기능 플래그 fetch 끔 → 코드 기본값 사용 |
+| 업데이트 | `DISABLE_UPDATES=1` | `claude update`·`claude install` 포함 **모든 업데이트** |
+| | `DISABLE_AUTOUPDATER=1` | 백그라운드 자동 업데이트 |
+| | `DISABLE_UPGRADE_COMMAND=1` | `/upgrade` 명령 숨김 |
+| 피드백 | `DISABLE_FEEDBACK_COMMAND=1` | `/feedback`·`/bug`·`/share`·sendFeedback 도구 |
+| | `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` | "How is Claude doing?" 세션 품질 설문 |
+| | `CLAUDE_CODE_SEND_FEEDBACK=0` | Claude가 작성한 피드백 |
+| 플러그인/마켓 | `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` | 공식 마켓 자동 등록(등록 후엔 해제해도 안 돌아옴) |
+| | `CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE=1` | 새로고침 실패 시 기존 체크아웃 유지(에어갭 권장) |
+| | `DISABLE_INSTALL_GITHUB_APP_COMMAND=1` | `/install-github-app` 숨김 |
+| claude.ai | `ENABLE_CLAUDEAI_MCP_SERVERS=false` | claude.ai MCP 커넥터 가져오기 |
+| | `CLAUDE_CODE_DISABLE_ARTIFACT=1` | 산출물을 claude.ai 웹페이지로 게시 |
+| 웹 도구 | `CLAUDE_CODE_DISABLE_WEB_FETCH=1` | `WebFetch` 도구(v2.1.285+) |
+| | (전용 env 없음) | `WebSearch`는 CLI `--disallowedTools "WebSearch"`로 차단 |
+| IDE 연동 | `CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1` | IDE 확장 자동 설치 |
+| | `CLAUDE_CODE_AUTO_CONNECT_IDE=false` | IDE 자동 연결 |
+
+**설정하지 말 것(켜는 변수)**: `CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE`, `FORCE_AUTOUPDATE_PLUGINS`, `CLAUDE_CODE_ENABLE_TELEMETRY`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`(이미 끔).
+
+**기능 플래그 fetch의 영향**: 위 차단으로 **기능 플래그 fetch가 꺼집니다**. 게다가 우리 구성은 `ANTHROPIC_AUTH_TOKEN`(게이트웨이 토큰) + 비(非)Anthropic `ANTHROPIC_BASE_URL`라서 **애초에 플래그를 가져올 자격 증명이 없습니다**. 그 결과 미동작 항목(대부분 무해): `/auto-mode-setup` 초안, Remote Control, 다른 머신 세션 메시지, `claude import`/`/import`, `/skill-doctor`·plugin Stats, claude.ai 스킬/플러그인 동기화, advisor·아티팩트 댓글, Claude 작성 피드백, 붙여넣기 처리. **주의**: API가 거부할 잘못된 입력 스키마의 MCP 도구를 걸러주는 기능도 꺼지므로, 이런 도구가 있으면 400 오류가 날 수 있습니다.
+
+**WebFetch preflight**: Claude Code의 WebFetch는 요청 전 `api.anthropic.com`에 도메인 차단 여부를 묻고, 이 조회가 실패하면 fetch를 거부합니다. 외부망이 없으면 어차피 실패하므로 `CLAUDE_CODE_DISABLE_WEB_FETCH=1`로 끕니다. (WebFetch를 내부 URL용으로 쓰려면 끄지 말고 `settings.json`에 `skipWebFetchPreflight: true`를 설정.)
+
+**프록시/TLS(참고)**: 내부를 프록시로만 나가는 환경이면 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`, 사내 CA는 `CLAUDE_CODE_CERT_STORE`(예: `system`)/`NODE_EXTRA_CA_CERTS`를 사용합니다. 순수 폐쇄망(외부 차단)에는 불필요.
+
 ## 사용한 환경변수 레퍼런스
 | 목적 | 변수 |
 |---|---|
@@ -405,7 +468,7 @@ curl -sS http://10.29.248.6:4000/v1/messages \
 | MCP 서버 | CLI `--mcp-config`(파일/문자열), `--strict-mcp-config`; 시작 타임아웃 `MCP_TIMEOUT`, `MCP_CONNECT_TIMEOUT_MS` |
 | 창/출력 한계 | `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS` |
 | 업데이트 차단 | `DISABLE_UPDATES`, `DISABLE_AUTOUPDATER` |
-| 외부 트래픽 차단 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL` |
+| 폐쇄망 차단(오프라인) | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `DISABLE_ERROR_REPORTING`, `DISABLE_GROWTHBOOK`, `DISABLE_UPDATES`, `DISABLE_AUTOUPDATER`, `DISABLE_UPGRADE_COMMAND`, `DISABLE_FEEDBACK_COMMAND`, `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`, `CLAUDE_CODE_SEND_FEEDBACK`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL`, `CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE`, `DISABLE_INSTALL_GITHUB_APP_COMMAND`, `ENABLE_CLAUDEAI_MCP_SERVERS`, `CLAUDE_CODE_DISABLE_ARTIFACT`, `CLAUDE_CODE_DISABLE_WEB_FETCH`, `CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL`, `CLAUDE_CODE_AUTO_CONNECT_IDE` |
 | 플러그인 | `CLAUDE_CODE_PLUGIN_CACHE_DIR`, `CLAUDE_CODE_PLUGIN_SEED_DIR`, `CLAUDE_CODE_PLUGIN_DIRS` |
 | 서브프로세스 자격증명 제거 | `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` |
 | 프록시/TLS | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `CLAUDE_CODE_CERT_STORE`, `CLAUDE_CODE_PROXY_RESOLVES_HOSTS` |
@@ -441,3 +504,4 @@ curl -sS http://10.29.248.6:4000/v1/messages \
 - 값 구분: **모델명은 실제 오픈소스 모델명 유지**, **서버 주소·포트·토큰·라우터 정보는 난수 placeholder**.
 - 모델 정렬: **무게순(거대 → 라이트)** `deepseek-coder-v2` > `qwen3-coder` > `mistral-nemo` > `llama3.1` > `gemma4` (피커·라우터 공통). 별칭 서열 fable > opus > sonnet > haiku.
 - MCP: **래퍼가 매 실행 시 `$CLAUDE_CONFIG_DIR/mcp.json` 생성**(소스=`claude_install/mcp.json`) 후 `--mcp-config`로 전달(기존 설정과 병합). 폐쇄망은 로컬 `stdio` 서버 우선.
+- 폐쇄망 차단: 래퍼가 **비필수 트래픽·업데이트·텔레메트리·기능 플래그·웹 도구(WebFetch/WebSearch)·마켓플레이스·claude.ai 연결**을 전면 비활성(위 "폐쇄망 오프라인 환경변수" 표). `WebSearch`만 env가 없어 `--disallowedTools`로 차단.

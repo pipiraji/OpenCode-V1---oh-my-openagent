@@ -37,6 +37,7 @@ set -Eeuo pipefail
 #   ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL
 #   ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL / CLAUDE_CODE_SUBAGENT_MODEL
 #   DISABLE_UPDATES / DISABLE_AUTOUPDATER / CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+#   (그 외 폐쇄망 차단 변수 전체는 아래 '폐쇄망(외부 인터넷 불가) 차단' 블록 참조)
 # ============================================================================
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -121,10 +122,40 @@ if [[ -f "$MCP_SRC" ]]; then
   MCP_ARG=(--mcp-config "$CONFIG_DIR/mcp.json")
 fi
 
-# 외부 트래픽·업데이트 차단
-export DISABLE_UPDATES=1
-export DISABLE_AUTOUPDATER=1
+# ============================================================================
+# 폐쇄망(외부 인터넷 불가) 차단 — 비필수 트래픽·업데이트·텔레메트리·웹 접근
+#   ※ 대부분 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC 하나로 포괄되지만,
+#     의도와 영향을 명시적으로 남기기 위해 개별 변수도 함께 선언한다.
+# ============================================================================
+# (1) 총괄 — 자동업데이트·텔레메트리·오류보고·/feedback·릴리스노트·PR/MR 배지·
+#     빠른모드 가용성 확인·기능 플래그(GrowthBook) 가져오기까지 한 번에 차단.
+#     값이 0/false 여도 여전히 차단되며, 해제하려면 unset.
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+# (2) 텔레메트리 / 추적 / 오류보고
+export DISABLE_TELEMETRY=1              # Statsig·OTel (0 이어도 거부됨)
+export DO_NOT_TRACK=1                   # 개발자 CLI 공통 규약 (DISABLE_TELEMETRY 와 동일)
+export DISABLE_ERROR_REPORTING=1        # Sentry 류 오류보고 거부 (0 이어도 거부됨)
+export DISABLE_GROWTHBOOK=1             # 기능 플래그 fetch 끔 → 코드 기본값 사용
+# (3) 업데이트 — 폐쇄망은 새 버전을 받을 수 없음
+export DISABLE_UPDATES=1                # 수동 `claude update`/`claude install` 포함 전면 차단
+export DISABLE_AUTOUPDATER=1            # 백그라운드 자동 업데이트 (DISABLE_UPDATES 가 더 엄격)
+export DISABLE_UPGRADE_COMMAND=1        # /upgrade 명령 숨김
+# (4) 피드백 / 설문 — Anthropic 전송 경로
+export DISABLE_FEEDBACK_COMMAND=1       # /feedback·/bug·/share
+export CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1   # "How is Claude doing?" 세션 설문
+export CLAUDE_CODE_SEND_FEEDBACK=0             # Claude 가 작성한 피드백
+# (5) 플러그인 / 마켓플레이스 — 원격 git clone·등록
+export CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1  # 공식 마켓 자동 등록 안 함
+export CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE=1        # 새로고침 실패해도 기존 체크아웃 유지(에어갭)
+export DISABLE_INSTALL_GITHUB_APP_COMMAND=1                    # /install-github-app 숨김
+# (6) claude.ai 연결 — 커넥터·아티팩트
+export ENABLE_CLAUDEAI_MCP_SERVERS=false   # claude.ai MCP 서버 가져오기 끔
+export CLAUDE_CODE_DISABLE_ARTIFACT=1      # 산출물을 claude.ai 웹페이지로 게시하는 Artifact 끔
+# (7) 웹 도구 — 외부 인터넷 불가
+export CLAUDE_CODE_DISABLE_WEB_FETCH=1     # WebFetch 끔 (v2.1.285+). WebSearch 는 env 가 없어 exec 의 --disallowedTools 로 차단
+# (8) IDE 연동 — 확장 자동 설치·자동 연결 시도 방지
+export CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1
+export CLAUDE_CODE_AUTO_CONNECT_IDE=false
 
 # 런타임 config 위치를 Claude Code 에 알림 (기본 ~/.claude 대신 /tmp)
 export CLAUDE_CONFIG_DIR="$CONFIG_DIR"
@@ -150,9 +181,10 @@ export CLAUDE_STREAM_IDLE_TIMEOUT_MS=600000            # 스트림 정체 타임
 # export CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072
 
 # permissions (settings.json 대신 CLI 플래그)
+#   WebSearch 는 전용 env 가 없어 여기서 차단(WebFetch 는 CLAUDE_CODE_DISABLE_WEB_FETCH 로 이미 차단)
 exec "$BINARY" \
   --permission-mode default \
   --allowedTools "Bash(git status *)" "Bash(git diff *)" \
-  --disallowedTools "Bash(git push *)" "Bash(sudo *)" "Read(./.env)" \
+  --disallowedTools "Bash(git push *)" "Bash(sudo *)" "Read(./.env)" "WebFetch" "WebSearch" \
   "${MCP_ARG[@]}" \
   "$@"
